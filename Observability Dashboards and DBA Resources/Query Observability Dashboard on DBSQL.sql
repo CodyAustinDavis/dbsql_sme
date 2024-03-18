@@ -96,3 +96,6 @@ SELECT
 parse_query_tag(statement_text) AS query_tag,
 CASE WHEN CumulativeProportionOfTime::float <= '${pareto_point}'::float THEN statement_text ELSE 'Remaining Queries' END AS QueryPareto
 FROM cumulative_sum
+
+-- What % of warehouse time was unused?
+-- Of the used %, what % went to each query?
