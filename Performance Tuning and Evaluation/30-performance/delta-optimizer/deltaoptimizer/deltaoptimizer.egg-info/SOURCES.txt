@@ -1,0 +1,7 @@
+deltaoptimizer.py
+setup.py
+deltaoptimizer.egg-info/PKG-INFO
+deltaoptimizer.egg-info/SOURCES.txt
+deltaoptimizer.egg-info/dependency_links.txt
+deltaoptimizer.egg-info/requires.txt
+deltaoptimizer.egg-info/top_level.txt

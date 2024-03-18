@@ -1,0 +1,8 @@
+Metadata-Version: 2.1
+Name: deltaoptimizer
+Version: 1.5.5
+Summary: Delta Optimizer Beta - UC Enabled
+Author: Cody Austin Davis @Databricks, Inc.
+Author-email: cody.davis@databricks.com
+Requires-Dist: sqlparse
+Requires-Dist: sql_metadata

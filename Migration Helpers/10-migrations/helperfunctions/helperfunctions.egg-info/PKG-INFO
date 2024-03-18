@@ -1,0 +1,10 @@
+Metadata-Version: 2.1
+Name: helperfunctions
+Version: 2.0.1
+Summary: Lakehouse Warehousing and Delta Helper Functions
+Author: Cody Austin Davis @Databricks, Inc.
+Author-email: cody.davis@databricks.com
+Requires-Dist: sqlparse
+Requires-Dist: sql_metadata
+Requires-Dist: sqlglot
+Requires-Dist: pyarrow
