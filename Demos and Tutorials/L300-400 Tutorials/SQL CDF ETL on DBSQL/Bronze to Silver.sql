@@ -92,13 +92,18 @@ SELECT next_temp_checkpoint AS latest_version, now() AS update_timestamp;
 
 -- COMMAND ----------
 
--- DBTITLE 1,Check for Erroneous test records
+-- DBTITLE 1,Check for Erroneous test record tests
 -- We ran COPY INTO 2 times with force=true to simulate duplicate / bad data loads
 -- We added a deletes with Id = 2 in bronze (could be manual or automated from CDF) -- Should return no results
 -- We update a record with Id = 1 to num_steps = 99999;
 
 SELECT * FROM cdf_demo_silver_sensors
 WHERE Id = 2
+
+-- COMMAND ----------
+
+SELECT * FROM cdf_demo_silver_sensors 
+WHERE Id = 1
 
 -- COMMAND ----------
 

@@ -82,9 +82,6 @@ CLUSTER BY (Id, user_id, device_id);
 
 --TIP:  Not always necessary depending on your update patterns, can track this directly in the silver table as well, just might be faster and more reliable if track in a separate table
 
----===== Step 3 - Create watermark CDF version tracking table(s) (options, could also track in the table itslef, just more performant this way)
-
-
 -- COMMAND ----------
 
 -- DBTITLE 1,Define Version Checkpoints

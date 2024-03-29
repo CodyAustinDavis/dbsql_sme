@@ -22,6 +22,7 @@ SELECT
   AVG(total_usage) OVER (ORDER BY usage_hour ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) AS slow_moving_average
 FROM usage_aggregated
 ),
+
 pop_change AS (
 SELECT 
 *,
