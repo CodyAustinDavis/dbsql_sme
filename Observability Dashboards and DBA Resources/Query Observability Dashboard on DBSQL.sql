@@ -63,6 +63,9 @@ RETURN
       SELECT regexp_replace(regexp_extract(input_sql, pattern, 0), '--QUERY_TAG:', '') AS raw_tagged
       )
     SELECT CASE WHEN length(raw_tagged) >= 1 THEN raw_tagged ELSE no_tag_default END AS clean_tag FROM tagged_query
+
+
+    regexp_replace(regexp_extract(input_sql, '--QUERY_TAG:(.*?)(\r\n|\n|$)', 0), '--QUERY_TAG:', '') AS raw_tagged
 ;
 
 -- COMMAND ----------

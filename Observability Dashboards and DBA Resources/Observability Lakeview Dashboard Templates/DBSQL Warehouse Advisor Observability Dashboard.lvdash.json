@@ -3,7 +3,7 @@
     {
       "name": "47328a9c",
       "displayName": "Query History With Ratios",
-      "query": "/*\nTO DO: \n-- Make execution_type, execution_status parameters once multi-valued params comes out so all calculations downstream are dynamic\n\n\n\n\n*/\nWITH history AS (\nSELECT\nstatement_id,\nexecuted_by,\nstatement_text,\nwarehouse_id,\nexecution_status,\nf.statement_type,\nCOALESCE(try_divide(total_duration_ms, 1000), 0) AS QueryRuntimeSeconds,\nCOALESCE(try_divide(total_task_duration_ms, 1000), 0) AS CPUTotalExecutionTime,\nCOALESCE(try_divide(execution_duration_ms, 1000), 0) AS ExecutionQueryTime,\nCOALESCE(try_divide(compilation_duration_ms, 1000), 0) AS CompilationQueryTime,\nCOALESCE(try_divide(waiting_at_capacity_duration_ms, 1000), 0) AS QueueQueryTime,\nCOALESCE(try_divide(waiting_for_compute_duration_ms, 1000), 0) AS StartUpQueryTime,\nCOALESCE(try_divide(result_fetch_duration_ms, 1000), 0) AS ResultFetchTime,\nstart_time,\nend_time,\nupdate_time,\nCOALESCE(read_bytes, 0) AS read_bytes,\nCOALESCE(read_io_cache_percent, 0) AS read_io_cache_percent,\nfrom_result_cache,\nCOALESCE(spilled_local_bytes, 0) AS spilled_local_bytes,\nCOALESCE(total_task_duration_ms / total_duration_ms, NULL) AS TotalCPUTime_To_Execution_Time_Ratio, --execution time does seem to vary across query type, using total time to standardize\nCOALESCE(waiting_at_capacity_duration_ms / total_duration_ms, 0) AS ProportionQueueTime,\nAVG(try_divide(total_duration_ms, 1000))  OVER () AS WarehouseAvgQueryRuntime,\nAVG(try_divide(waiting_at_capacity_duration_ms, 1000)) OVER () AS WarehouseAvgQueueTime,\nAVG(COALESCE(try_divide(waiting_at_capacity_duration_ms, 1000) / try_divide(total_duration_ms, 1000), 0)) OVER () AS WarehouseAvgProportionTimeQueueing,\nSUM(try_divide(total_duration_ms, 1000)) OVER () AS TotalUsedTimeInWarehouse,\nSUM(try_divide(total_duration_ms, 1000)) OVER (PARTITION BY statement_text) AS TotalStatementTextTimeUsed, -- for query level aggregates\ntry_divide(try_divide(total_duration_ms, 1000) , TotalUsedTimeInWarehouse) AS ProportionOfWarehouseTimeUsedByQuery ,\n-- Can use this to chargeback (as long as you know denominator is only USED task time, not including idele time)\nCASE WHEN read_bytes > 0 THEN try_divide(read_bytes,(1024*1024*1024))ELSE 0 END AS ReadDataAmountInGB,\nCASE WHEN read_io_cache_percent > 0 THEN 'Used Cache' ELSE 'No Cache' END AS UsedCacheFlag,\nCASE WHEN spilled_local_bytes > 0 THEN 'Spilled Data To Disk' ELSE 'No Spill' END AS HasSpillFlag,\nCASE WHEN read_bytes > 0 THEN 'Did Read Data' ELSE 'No Data Read' END AS ReadDataFlag,\nCASE WHEN CPUTotalExecutionTime > 0 THEN 'UsedWorkerTasks' ELSE 'NoWorkers' END AS UsedWorkerTasksFlag,\nCASE WHEN QueryRuntimeSeconds >= :long_running_seconds_treshold::float THEN 'Long Running' ELSE 'Short Running' END AS LongRunningQueryFlag,\nCASE WHEN spilled_local_bytes > 0 THEN 1 ELSE 0 END AS Calc_HasSpillFlag,\nCASE WHEN read_bytes > 0 THEN 0.25 ELSE 0 END AS Calc_ReadDataFlag,\nCASE WHEN CPUTotalExecutionTime > 0 THEN 0.25 ELSE 0 END AS Calc_UsedWorkerTasksFlag,\nCASE WHEN QueryRuntimeSeconds >= :long_running_seconds_treshold::float THEN 1 ELSE 0 END AS Calc_LongRunningQueryFlag\nFROM system.query.history f\nWHERE warehouse_id = :warehouse_id\nAND start_time BETWEEN :start_range::timestamp AND :end_range::timestamp -- TO DO: this technically does not line up with \nAND statement_type IS NOT NULL\n),\n\n-- Warehosue Costs for the same query window \nfiltered_warehouse_usage AS (\n        -- This is to properly handle attributing partial hours/seconds and match it to the seleted query window\n\n        WITH trimmed_usage AS (\n        SELECT \n        -- Start Time Range Trimming\n        timestampdiff(SECOND, usage_start_time, :start_range)::float AS seconds_before_start_range,\n        timestampdiff(SECOND, usage_start_time, usage_end_time)::float AS full_start_range_length,\n        full_start_range_length - seconds_before_start_range AS seconds_remaining_in_original_start_range,\n        greatest(:start_range, usage_start_time) AS trimmed_start_time,\n        -- End Time Range Trimming\n        least(:end_range, usage_end_time) AS trimmed_end_time,\n        timestampdiff(SECOND, :end_range, usage_end_time)::float AS seconds_after_end_range,\n        timestampdiff(SECOND, usage_start_time, usage_end_time)::float AS full_end_range_length,\n        full_end_range_length - seconds_after_end_range AS seconds_remaining_in_original_end_range,\n\n        -- Calculate trim proportion to multiple DBUs by proportion of the full hour in the active window\n        try_divide(CASE WHEN seconds_before_start_range > 0 THEN (full_start_range_length - seconds_before_start_range) ELSE NULL END, full_start_range_length) AS StartTrimProportion,\n        try_divide(CASE WHEN seconds_after_end_range > 0 THEN (full_start_range_length - seconds_after_end_range) ELSE NULL END, full_start_range_length) AS EndTrimProportion,\n        COALESCE(COALESCE(EndTrimProportion, StartTrimProportion), 1) AS TrimProportion,\n        usage_start_time,\n        usage_end_time,\n        usage_quantity AS dbus,\n        usage_metadata.warehouse_id AS warehouse_id\n        FROM system.billing.usage\n        WHERE usage_metadata.warehouse_id = :warehouse_id\n        AND usage_unit = 'DBU'\n        AND (\n        (usage_start_time BETWEEN :start_range::timestamp AND :end_range::timestamp)\n        OR (usage_end_time BETWEEN :start_range::timestamp AND :end_range::timestamp)\n        )\n        )\n\n        SELECT \n        warehouse_id,\n        SUM(dbus*TrimProportion) AS Total_Warehouse_Period_DBUs,\n        SUM(dbus*TrimProportion*:cluster_unit_price::float) AS Total_Warehouse_Period_Dollars\n        FROM trimmed_usage\n        GROUP BY warehouse_id\n),\n\n\n/*\nWAREHOUSE LEVEL SKEW / EFFICIENCY METRICS\n-- Calculate the warehouse average task times to execution time to get a basedline to compare relative skew/efficiency across warehouse\nNOTE: We do this because we do not yet have the \"warehouses\" table, which would give us the size/rough cores of the cluster, \nso we do NOT programmatically have the ability to know what a proper ratio is. If we knew the number of cores on the cluster, our skew ratio would look like this: \n\nSKEW RATIO = (TotalQueryTaskTime / NumberOfCores) / ExecutionTime = 1 in a perfect/avg scenario. This means that ALL cores were perfectly fully utilize during the entire execution\nRatio ~1 means that there is lots of paralleliszation (high tasks time per unit of time).\nRatio < 1 means that the exeuction time was not fully filled by task time across all cores. The smaller this number is, the more likely it is to be skewed. \nShould never really have a ratio > 1 (that would mean there were more total task time than cores could theoretically processs) when we KNOW the number of cores. \n-- Is the query getting the warehouse fully?\n-- Good ratio (is .5 reasonable?)\n-- Closer to zero is a problem (<0.05) -- only matters when queyies are large (filter num tasks / cores)\n\nNow since we do NOTE automatically know the number of cores, we have to make this ratio relative and create a PROXY metric. \nTo do that, we will take the average ratio of Total Task Time / Execution Time across the whole warehouse for ALL queries that had task time (exclude metadata operations)\nIdeal Ratio = 1 = ((Task Time)/ Cores ) / Execution Time\nSo Execution Time = Task Time / Cores\nSo Cores = Task Time / Execution Time in a perfect / avg scenario. \n\nThis is NOT perfect, but helps as a proxy for now. Since this metric is to identify relatively inefficient/skewed queryes, it should work well enough. \n\n*/\n\nwarehouse_average_ratio_metrics AS (\nSELECT \nwarehouse_id,\ntry_divide(AVG(CPUTotalExecutionTime)::float, AVG(QueryRuntimeSeconds)::float)::float AS WarehouseAvgTaskSkewRatio,\ntry_divide(MAX(CPUTotalExecutionTime), MAX(QueryRuntimeSeconds))::float AS WarehouseMaxTaskSkewRatio,\nAVG(ReadDataAmountInGB)::float AS WarehouseAvgReadDataInGBPerQuery,\nstddev(ReadDataAmountInGB)::float AS WarehouseStdReadDataInGBPerQuery,\nAVG(read_io_cache_percent)::float AS WarehouseAvgDeltaCachePercent,\nstddev(read_io_cache_percent)::float AS WarehouseStdDeltaCachePercent,\nAVG(spilled_local_bytes)::float AS WarehouseAvgDiskSpillAmount,\nstddev(spilled_local_bytes)::float AS WarehouseStdDiskSpillAmount\nFROM history\nWHERE CPUTotalExecutionTime > 0 AND ReadDataAmountInGB > 0 -- Means that the query read data as well as used cpu task time in workers\nAND execution_status NOT IN (\"FAILED\")\nGROUP BY warehouse_id\n),\n\n-- Single Metric to indicate an inefficient query\n/*\nInefficient query attributes: \n1. Long runtime (> X number of seconds/minutes)\n2. Poor Parallelization (high wall clock time with low task time compared to ratio of all warehouse)\n3. Spilling To Disk\n4. Lots of Data Read (Compared to Avg Data Read for Warehouse) - Using Z Score as a rough metric for this\n\nPrecursor filters\n1. Query must have task time > 0 (meaning workers were actually used to execute the query) (this filters out non sparky stuff like GRANT/ALTER/metadata)\n2. Must have data read in (>0 GB)\n*/\n\nquery_level_intel_metrics AS (\nSELECT qh.*,\nw.WarehouseAvgTaskSkewRatio AS WarehouseAvgTaskToExecutionTimeRatio,\n\n-- For the query efficiency ratio, we invert the above ratio to use the warehouse proxy metric\nCASE WHEN CPUTotalExecutionTime > 0 \n        AND ReadDataAmountInGB > 0 -- Means that the query read data as well as used cpu task time in workers\n        AND execution_status NOT IN (\"FAILED\")\n    THEN try_divide(QueryRuntimeSeconds, try_divide(qh.CPUTotalExecutionTime, w.WarehouseAvgTaskSkewRatio))\n    ELSE NULL\n    END AS QueryEfficiencyRatio,  -- WarehouseSkewRatio is the proxy for number of cores/level of parallelism in the cluster\nw.WarehouseAvgReadDataInGBPerQuery,\nw.WarehouseStdReadDataInGBPerQuery,\nw.WarehouseAvgDeltaCachePercent,\nw.WarehouseStdDeltaCachePercent,\nw.WarehouseAvgDiskSpillAmount,\nw.WarehouseStdDiskSpillAmount,\nu.Total_Warehouse_Period_Dollars,\n(u.Total_Warehouse_Period_Dollars::float*ProportionOfWarehouseTimeUsedByQuery::float) AS AllocatedQueryCostByTime\nFROM history AS qh\nLEFT JOIN warehouse_average_ratio_metrics AS w ON w.warehouse_id = qh.warehouse_id\nLEFT JOIN filtered_warehouse_usage AS u ON u.warehouse_id = qh.warehouse_id\n),\n\n-- Calculate Z Score for warehouse read data and other metrics\nzscores AS (\nSELECT \n*,\nAVG(QueryEfficiencyRatio) OVER () AS WarehouseAvgQueryEfficiencyRatio,\ntry_divide((spilled_local_bytes - WarehouseAvgDiskSpillAmount) , WarehouseStdDiskSpillAmount) AS SpillAmountZScore,\ntry_divide((read_io_cache_percent - WarehouseAvgDeltaCachePercent), WarehouseStdDeltaCachePercent) AS CachePercentZScore,\ntry_divide((ReadDataAmountInGB - WarehouseAvgReadDataInGBPerQuery), WarehouseStdReadDataInGBPerQuery) AS DataVolumeZScore,\n\nPERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY QueryRuntimeSeconds) OVER () AS QueryRuntime_P50,\nPERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY QueryRuntimeSeconds) OVER () AS QueryRuntime_P90,\nPERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY QueryRuntimeSeconds) OVER () AS QueryRuntime_P95,\nPERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY QueryRuntimeSeconds) OVER () AS QueryRuntime_P99,\n-- Queue Time\nPERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY QueueQueryTime) OVER () AS QueryQueueTime_P50,\nPERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY QueueQueryTime) OVER () AS QueryQueueTime_P90,\nPERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY QueueQueryTime) OVER () AS QueryQueueTime_P95,\nPERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY QueueQueryTime) OVER () AS QueryQueueTime_P99\nFROM query_level_intel_metrics\n)\n\nSELECT \n*,\nCASE WHEN DataVolumeZScore > (CASE WHEN length(:data_volume_min_z_score::float) > 1 THEN :data_volume_min_z_score::float ELSE 1 END) THEN 'High Relative Volume Read' ELSE 'Not High Relative Volume' END AS HighDataVolumeFlag,\nCASE WHEN DataVolumeZScore > (CASE WHEN length(:data_volume_min_z_score::float) > 1 THEN :data_volume_min_z_score::float ELSE 1 END) THEN 1 ELSE 0 END AS Calc_HighDataVolumeFlag,\n(Calc_HasSpillFlag + Calc_ReadDataFlag + Calc_UsedWorkerTasksFlag + Calc_LongRunningQueryFlag + Calc_HighDataVolumeFlag\n+ COALESCE(SpillAmountZScore, 0) + COALESCE(DataVolumeZScore, 0)) AS ProblemQueryMetric,\n\n-- P50, 90,95,99\nQueryRuntime_P50,\nQueryRuntime_P90,\nQueryRuntime_P95,\nQueryRuntime_P99,\n-- Queue Time\nQueryQueueTime_P50,\nQueryQueueTime_P90,\nQueryQueueTime_P95,\nQueryQueueTime_P99\nFROM zscores\n\n\n\n",
+      "query": "/*\nTO DO: \n-- Make execution_type, execution_status parameters once multi-valued params comes out so all calculations downstream are dynamic\n\n\n\n\n*/\nWITH history AS (\nSELECT\nstatement_id,\nexecuted_by,\nstatement_text,\nwarehouse_id,\nexecution_status,\nf.statement_type,\nCOALESCE(try_divide(total_duration_ms, 1000), 0) AS QueryRuntimeSeconds,\nCOALESCE(try_divide(total_task_duration_ms, 1000), 0) AS CPUTotalExecutionTime,\nCOALESCE(try_divide(execution_duration_ms, 1000), 0) AS ExecutionQueryTime,\nCOALESCE(try_divide(compilation_duration_ms, 1000), 0) AS CompilationQueryTime,\nCOALESCE(try_divide(waiting_at_capacity_duration_ms, 1000), 0) AS QueueQueryTime,\nCOALESCE(try_divide(waiting_for_compute_duration_ms, 1000), 0) AS StartUpQueryTime,\nCOALESCE(try_divide(result_fetch_duration_ms, 1000), 0) AS ResultFetchTime,\nstart_time,\nend_time,\nupdate_time,\nCOALESCE(read_bytes, 0) AS read_bytes,\nCOALESCE(read_io_cache_percent, 0) AS read_io_cache_percent,\nfrom_result_cache,\nCOALESCE(spilled_local_bytes, 0) AS spilled_local_bytes,\nCOALESCE(total_task_duration_ms / total_duration_ms, NULL) AS TotalCPUTime_To_Execution_Time_Ratio, --execution time does seem to vary across query type, using total time to standardize\nCOALESCE(waiting_at_capacity_duration_ms / total_duration_ms, 0) AS ProportionQueueTime,\nAVG(try_divide(total_duration_ms, 1000))  OVER () AS WarehouseAvgQueryRuntime,\nAVG(try_divide(waiting_at_capacity_duration_ms, 1000)) OVER () AS WarehouseAvgQueueTime,\nAVG(COALESCE(try_divide(waiting_at_capacity_duration_ms, 1000) / try_divide(total_duration_ms, 1000), 0)) OVER () AS WarehouseAvgProportionTimeQueueing,\nSUM(try_divide(total_duration_ms, 1000)) OVER () AS TotalUsedTimeInWarehouse,\nSUM(try_divide(total_duration_ms, 1000)) OVER (PARTITION BY statement_text) AS TotalStatementTextTimeUsed, -- for query level aggregates\ntry_divide(try_divide(total_duration_ms, 1000) , TotalUsedTimeInWarehouse) AS ProportionOfWarehouseTimeUsedByQuery ,\n-- Can use this to chargeback (as long as you know denominator is only USED task time, not including idele time)\nCASE WHEN read_bytes > 0 THEN try_divide(read_bytes,(1024*1024*1024))ELSE 0 END AS ReadDataAmountInGB,\nCASE WHEN read_io_cache_percent > 0 THEN 'Used Cache' ELSE 'No Cache' END AS UsedCacheFlag,\nCASE WHEN spilled_local_bytes > 0 THEN 'Spilled Data To Disk' ELSE 'No Spill' END AS HasSpillFlag,\nCASE WHEN read_bytes > 0 THEN 'Did Read Data' ELSE 'No Data Read' END AS ReadDataFlag,\nCASE WHEN CPUTotalExecutionTime > 0 THEN 'UsedWorkerTasks' ELSE 'NoWorkers' END AS UsedWorkerTasksFlag,\nCASE WHEN QueryRuntimeSeconds >= :long_running_seconds_treshold::float THEN 'Long Running' ELSE 'Short Running' END AS LongRunningQueryFlag,\nCASE WHEN spilled_local_bytes > 0 THEN 1 ELSE 0 END AS Calc_HasSpillFlag,\nCASE WHEN read_bytes > 0 THEN 0.25 ELSE 0 END AS Calc_ReadDataFlag,\nCASE WHEN CPUTotalExecutionTime > 0 THEN 0.25 ELSE 0 END AS Calc_UsedWorkerTasksFlag,\nCASE WHEN QueryRuntimeSeconds >= :long_running_seconds_treshold::float THEN 1 ELSE 0 END AS Calc_LongRunningQueryFlag,\n\n-- Query Tagging \nregexp_replace(regexp_extract(statement_text, '--QUERY_TAG:(.*?)(\\r\\n|\\n|$)' , 0), '--QUERY_TAG:', '') AS raw_tagged\n\nFROM system.query.history f\nWHERE warehouse_id = :warehouse_id\nAND start_time BETWEEN :start_range::timestamp AND :end_range::timestamp -- TO DO: this technically does not line up with exact warehouse time window - need to split query time as well\nAND statement_type IS NOT NULL\n),\n\n-- Warehosue Costs for the same query window \nfiltered_warehouse_usage AS (\n        -- This is to properly handle attributing partial hours/seconds and match it to the seleted query window\n\n        WITH trimmed_usage AS (\n        SELECT \n        -- Start Time Range Trimming\n        timestampdiff(SECOND, usage_start_time, :start_range)::float AS seconds_before_start_range,\n        timestampdiff(SECOND, usage_start_time, usage_end_time)::float AS full_start_range_length,\n        full_start_range_length - seconds_before_start_range AS seconds_remaining_in_original_start_range,\n        greatest(:start_range, usage_start_time) AS trimmed_start_time,\n        -- End Time Range Trimming\n        least(:end_range, usage_end_time) AS trimmed_end_time,\n        timestampdiff(SECOND, :end_range, usage_end_time)::float AS seconds_after_end_range,\n        timestampdiff(SECOND, usage_start_time, usage_end_time)::float AS full_end_range_length,\n        full_end_range_length - seconds_after_end_range AS seconds_remaining_in_original_end_range,\n\n        -- Calculate trim proportion to multiple DBUs by proportion of the full hour in the active window\n        try_divide(CASE WHEN seconds_before_start_range > 0 THEN (full_start_range_length - seconds_before_start_range) ELSE NULL END, full_start_range_length) AS StartTrimProportion,\n        try_divide(CASE WHEN seconds_after_end_range > 0 THEN (full_start_range_length - seconds_after_end_range) ELSE NULL END, full_start_range_length) AS EndTrimProportion,\n        COALESCE(COALESCE(EndTrimProportion, StartTrimProportion), 1) AS TrimProportion,\n        usage_start_time,\n        usage_end_time,\n        usage_quantity AS dbus,\n        usage_metadata.warehouse_id AS warehouse_id\n        FROM system.billing.usage\n        WHERE usage_metadata.warehouse_id = :warehouse_id\n        AND usage_unit = 'DBU'\n        AND (\n        (usage_start_time BETWEEN :start_range::timestamp AND :end_range::timestamp)\n        OR (usage_end_time BETWEEN :start_range::timestamp AND :end_range::timestamp)\n        )\n        )\n\n        SELECT \n        warehouse_id,\n        SUM(dbus*TrimProportion) AS Total_Warehouse_Period_DBUs,\n        SUM(dbus*TrimProportion*:cluster_unit_price::float) AS Total_Warehouse_Period_Dollars\n        FROM trimmed_usage\n        GROUP BY warehouse_id\n),\n\n\n/*\nWAREHOUSE LEVEL SKEW / EFFICIENCY METRICS\n-- Calculate the warehouse average task times to execution time to get a basedline to compare relative skew/efficiency across warehouse\nNOTE: We do this because we do not yet have the \"warehouses\" table, which would give us the size/rough cores of the cluster, \nso we do NOT programmatically have the ability to know what a proper ratio is. If we knew the number of cores on the cluster, our skew ratio would look like this: \n\nSKEW RATIO = (TotalQueryTaskTime / NumberOfCores) / ExecutionTime = 1 in a perfect/avg scenario. This means that ALL cores were perfectly fully utilize during the entire execution\nRatio ~1 means that there is lots of paralleliszation (high tasks time per unit of time).\nRatio < 1 means that the exeuction time was not fully filled by task time across all cores. The smaller this number is, the more likely it is to be skewed. \nShould never really have a ratio > 1 (that would mean there were more total task time than cores could theoretically processs) when we KNOW the number of cores. \n-- Is the query getting the warehouse fully?\n-- Good ratio (is .5 reasonable?)\n-- Closer to zero is a problem (<0.05) -- only matters when queyies are large (filter num tasks / cores)\n\nNow since we do NOTE automatically know the number of cores, we have to make this ratio relative and create a PROXY metric. \nTo do that, we will take the average ratio of Total Task Time / Execution Time across the whole warehouse for ALL queries that had task time (exclude metadata operations)\nIdeal Ratio = 1 = ((Task Time)/ Cores ) / Execution Time\nSo Execution Time = Task Time / Cores\nSo Cores = Task Time / Execution Time in a perfect / avg scenario. \n\nThis is NOT perfect, but helps as a proxy for now. Since this metric is to identify relatively inefficient/skewed queryes, it should work well enough. \n\n*/\n\nwarehouse_average_ratio_metrics AS (\nSELECT \nwarehouse_id,\ntry_divide(AVG(CPUTotalExecutionTime)::float, AVG(QueryRuntimeSeconds)::float)::float AS WarehouseAvgTaskSkewRatio,\ntry_divide(MAX(CPUTotalExecutionTime), MAX(QueryRuntimeSeconds))::float AS WarehouseMaxTaskSkewRatio,\nAVG(ReadDataAmountInGB)::float AS WarehouseAvgReadDataInGBPerQuery,\nstddev(ReadDataAmountInGB)::float AS WarehouseStdReadDataInGBPerQuery,\nAVG(read_io_cache_percent)::float AS WarehouseAvgDeltaCachePercent,\nstddev(read_io_cache_percent)::float AS WarehouseStdDeltaCachePercent,\nAVG(spilled_local_bytes)::float AS WarehouseAvgDiskSpillAmount,\nstddev(spilled_local_bytes)::float AS WarehouseStdDiskSpillAmount\nFROM history\nWHERE CPUTotalExecutionTime > 0 AND ReadDataAmountInGB > 0 -- Means that the query read data as well as used cpu task time in workers\nAND execution_status NOT IN (\"FAILED\")\nGROUP BY warehouse_id\n),\n\n-- Single Metric to indicate an inefficient query\n/*\nInefficient query attributes: \n1. Long runtime (> X number of seconds/minutes)\n2. Poor Parallelization (high wall clock time with low task time compared to ratio of all warehouse)\n3. Spilling To Disk\n4. Lots of Data Read (Compared to Avg Data Read for Warehouse) - Using Z Score as a rough metric for this\n\nPrecursor filters\n1. Query must have task time > 0 (meaning workers were actually used to execute the query) (this filters out non sparky stuff like GRANT/ALTER/metadata)\n2. Must have data read in (>0 GB)\n*/\n\nquery_level_intel_metrics AS (\nSELECT qh.*,\nw.WarehouseAvgTaskSkewRatio AS WarehouseAvgTaskToExecutionTimeRatio,\n\n-- For the query efficiency ratio, we invert the above ratio to use the warehouse proxy metric\nCASE WHEN CPUTotalExecutionTime > 0 \n        AND ReadDataAmountInGB > 0 -- Means that the query read data as well as used cpu task time in workers\n        AND execution_status NOT IN (\"FAILED\")\n    THEN try_divide(QueryRuntimeSeconds, try_divide(qh.CPUTotalExecutionTime, w.WarehouseAvgTaskSkewRatio))\n    ELSE NULL\n    END AS QueryEfficiencyRatio,  -- WarehouseSkewRatio is the proxy for number of cores/level of parallelism in the cluster\nw.WarehouseAvgReadDataInGBPerQuery,\nw.WarehouseStdReadDataInGBPerQuery,\nw.WarehouseAvgDeltaCachePercent,\nw.WarehouseStdDeltaCachePercent,\nw.WarehouseAvgDiskSpillAmount,\nw.WarehouseStdDiskSpillAmount,\nu.Total_Warehouse_Period_Dollars,\n(u.Total_Warehouse_Period_Dollars::float*ProportionOfWarehouseTimeUsedByQuery::float) AS AllocatedQueryCostByTime\nFROM history AS qh\nLEFT JOIN warehouse_average_ratio_metrics AS w ON w.warehouse_id = qh.warehouse_id\nLEFT JOIN filtered_warehouse_usage AS u ON u.warehouse_id = qh.warehouse_id\n),\n\n-- Calculate Z Score for warehouse read data and other metrics\nzscores AS (\nSELECT \n*,\nAVG(QueryEfficiencyRatio) OVER () AS WarehouseAvgQueryEfficiencyRatio,\ntry_divide((spilled_local_bytes - WarehouseAvgDiskSpillAmount) , WarehouseStdDiskSpillAmount) AS SpillAmountZScore,\ntry_divide((read_io_cache_percent - WarehouseAvgDeltaCachePercent), WarehouseStdDeltaCachePercent) AS CachePercentZScore,\ntry_divide((ReadDataAmountInGB - WarehouseAvgReadDataInGBPerQuery), WarehouseStdReadDataInGBPerQuery) AS DataVolumeZScore,\n\nPERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY QueryRuntimeSeconds) OVER () AS QueryRuntime_P50,\nPERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY QueryRuntimeSeconds) OVER () AS QueryRuntime_P90,\nPERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY QueryRuntimeSeconds) OVER () AS QueryRuntime_P95,\nPERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY QueryRuntimeSeconds) OVER () AS QueryRuntime_P99,\n-- Queue Time\nPERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY QueueQueryTime) OVER () AS QueryQueueTime_P50,\nPERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY QueueQueryTime) OVER () AS QueryQueueTime_P90,\nPERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY QueueQueryTime) OVER () AS QueryQueueTime_P95,\nPERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY QueueQueryTime) OVER () AS QueryQueueTime_P99\n\nFROM query_level_intel_metrics\n)\n\nSELECT \n*,\nCASE WHEN DataVolumeZScore > (CASE WHEN length(:data_volume_min_z_score::float) > 1 THEN :data_volume_min_z_score::float ELSE 1 END) THEN 'High Relative Volume Read' ELSE 'Not High Relative Volume' END AS HighDataVolumeFlag,\nCASE WHEN DataVolumeZScore > (CASE WHEN length(:data_volume_min_z_score::float) > 1 THEN :data_volume_min_z_score::float ELSE 1 END) THEN 1 ELSE 0 END AS Calc_HighDataVolumeFlag,\n(Calc_HasSpillFlag + Calc_ReadDataFlag + Calc_UsedWorkerTasksFlag + Calc_LongRunningQueryFlag + Calc_HighDataVolumeFlag\n+ COALESCE(SpillAmountZScore, 0) + COALESCE(DataVolumeZScore, 0)) AS ProblemQueryMetric,\n\n-- P50, 90,95,99\nQueryRuntime_P50,\nQueryRuntime_P90,\nQueryRuntime_P95,\nQueryRuntime_P99,\n-- Queue Time\nQueryQueueTime_P50,\nQueryQueueTime_P90,\nQueryQueueTime_P95,\nQueryQueueTime_P99,\n\n-- Query Tag Cleaned\nCASE WHEN length(raw_tagged) >= 1 THEN raw_tagged ELSE 'Untagged' END AS QueryTag\nFROM zscores\n\n\n\n",
       "parameters": [
         {
           "displayName": "long_running_seconds_treshold",
@@ -174,8 +174,23 @@
     {
       "name": "a5ac741d",
       "displayName": "Query Statement Resource Attribution",
-      "query": "WITH history AS (\nSELECT\nstatement_id,\nexecuted_by,\nstatement_text,\nwarehouse_id,\nexecution_status,\nf.statement_type,\ntry_divide(total_duration_ms, 1000) AS QueryRuntimeSeconds,\ntry_divide(total_task_duration_ms, 1000) AS CPUTotalExecutionTime,\ntry_divide(execution_duration_ms, 1000) AS ExecutionQueryTime,\ntry_divide(compilation_duration_ms, 1000) AS CompilationQueryTime,\ntry_divide(waiting_at_capacity_duration_ms, 1000) AS QueueQueryTime,\ntry_divide(waiting_for_compute_duration_ms, 1000) AS StartUpQueryTime,\ntry_divide(result_fetch_duration_ms, 1000) AS ResultFetchTime,\nstart_time,\nend_time,\nCOALESCE(total_task_duration_ms / execution_duration_ms, NULL) AS TotalCPUTime_To_Execution_Time_Ratio,\nCOALESCE(waiting_at_capacity_duration_ms / total_duration_ms, 0) AS ProportionQueueTime,\nAVG(COALESCE(total_task_duration_ms / execution_duration_ms, NULL)) OVER () AS AvgTaskSkewRatio,\nAVG(try_divide(total_duration_ms, 1000))  OVER () AS AvgQueryRuntime,\nAVG(try_divide(waiting_at_capacity_duration_ms, 1000)) OVER () AS AvgQueueTime,\nAVG(COALESCE(try_divide(waiting_at_capacity_duration_ms, 1000) / try_divide(total_duration_ms, 1000), 0)) OVER () AS AvgProportionTimeQueueing,\nSUM(try_divide(total_duration_ms, 1000)) OVER () AS TotalUsedTimeInWarehouse,\nSUM(try_divide(total_duration_ms, 1000)) OVER (PARTITION BY statement_text) AS TotalStatementTextTimeUsed, -- for query level aggregates\ntry_divide(try_divide(total_duration_ms, 1000) , TotalUsedTimeInWarehouse) AS ProportionOfWarehouseTimeUsedByQuery \n-- Can use this to chargeback (as long as you know denominator is only USED task time, not including idele time)\nFROM system.query.history f\nWHERE warehouse_id = :warehouse_id\nAND (start_time >= :start_time AND end_time <= :end_time) -- Must pushdown these filters for accurate % aggregates by warehouse\nAND total_duration_ms > 0\nAND statement_type IS NOT NULL\n),\n\n-- Warehosue Costs for the same query window \nfiltered_warehouse_usage AS (\n        -- This is to properly handle attributing partial hours/seconds and match it to the seleted query window\n\n        WITH trimmed_usage AS (\n        SELECT \n        -- Start Time Range Trimming\n        timestampdiff(SECOND, usage_start_time, :start_time)::float AS seconds_before_start_range,\n        timestampdiff(SECOND, usage_start_time, usage_end_time)::float AS full_start_range_length,\n        full_start_range_length - seconds_before_start_range AS seconds_remaining_in_original_start_range,\n        greatest(:start_time, usage_start_time) AS trimmed_start_time,\n        -- End Time Range Trimming\n        least(:end_time, usage_end_time) AS trimmed_end_time,\n        timestampdiff(SECOND, :end_time, usage_end_time)::float AS seconds_after_end_range,\n        timestampdiff(SECOND, usage_start_time, usage_end_time)::float AS full_end_range_length,\n        full_end_range_length - seconds_after_end_range AS seconds_remaining_in_original_end_range,\n\n        -- Calculate trim proportion to multiple DBUs by proportion of the full hour in the active window\n        try_divide(CASE WHEN seconds_before_start_range > 0 THEN (full_start_range_length - seconds_before_start_range) ELSE NULL END, full_start_range_length) AS StartTrimProportion,\n        try_divide(CASE WHEN seconds_after_end_range > 0 THEN (full_start_range_length - seconds_after_end_range) ELSE NULL END, full_start_range_length) AS EndTrimProportion,\n        COALESCE(COALESCE(EndTrimProportion, StartTrimProportion), 1) AS TrimProportion,\n        usage_start_time,\n        usage_end_time,\n        usage_quantity AS dbus,\n        usage_metadata.warehouse_id AS warehouse_id\n        FROM system.billing.usage\n        WHERE usage_metadata.warehouse_id = :warehouse_id\n        AND usage_unit = 'DBU'\n        AND (\n        (usage_start_time BETWEEN :start_time::timestamp AND :end_time::timestamp)\n        OR (usage_end_time BETWEEN :start_time::timestamp AND :end_time::timestamp)\n        )\n        )\n\n        SELECT \n        warehouse_id,\n        SUM(dbus*TrimProportion) AS Total_Warehouse_Period_DBUs,\n        SUM(dbus*TrimProportion*:cluster_unit_price::float) AS Total_Warehouse_Period_Dollars\n        FROM trimmed_usage\n        GROUP BY warehouse_id\n),\n\nhistory_with_pricing AS (\nSELECT \nh1.*,\nwh.Total_Warehouse_Period_DBUs, \nwh.Total_Warehouse_Period_Dollars\nFROM history AS h1\nLEFT JOIN filtered_warehouse_usage AS wh ON h1.warehouse_id = wh.warehouse_id\n),\n\n\nquery_proportion_agg AS (\n-- Cumulative Sum by statement_text (not query id, but distinct statement)\nSELECT \n-- We do this to \nsha2(regexp_replace(regexp_replace(REGEXP_REPLACE(statement_text, '/\\\\*.*?\\\\*/', ''), '(--[^\\\\n]*)', ''), ' ', ''), 256) AS query_signature,\nMAX(statement_text) AS statement_text,\nCOUNT(statement_id) AS NumberOfExecutions,\nAVG(QueryRuntimeSeconds) AS AvgRuntimeInSeconds,\nMAX(TotalUsedTimeInWarehouse) AS TotalWarehouseTimeUsed,\nMAX(Total_Warehouse_Period_DBUs) AS Total_Warehouse_Period_DBUs,\nMAX(Total_Warehouse_Period_Dollars) AS Total_Warehouse_Period_Dollars,\nSUM(QueryRuntimeSeconds) AS TotalStatementTimeUsed,\nARRAY_DISTINCT(COLLECT_LIST(NAMED_STRUCT('user', executed_by, 'execution_count', (SELECT COUNT(statement_id) FROM history AS in_hist WHERE in_hist.executed_by = u.executed_by AND in_hist.statement_text = u.statement_text)))) AS UserRunCounts\nFROM history_with_pricing AS u\nGROUP BY query_signature\n),\n\nstatement_attribution AS (\nSELECT \na.*,\ntry_divide(TotalStatementTimeUsed, TotalWarehouseTimeUsed) AS StatementTaskTimeProportion,\nTotal_Warehouse_Period_Dollars*StatementTaskTimeProportion AS StatementAllocatedDollars,\nTotal_Warehouse_Period_DBUs*StatementTaskTimeProportion AS StatementAllocatedDBUs\nFROM query_proportion_agg a\n),\n\nstatement_rollup_cumulative_sum AS (\n    SELECT \n    *,\n    SUM(StatementTaskTimeProportion) OVER (ORDER BY StatementTaskTimeProportion DESC) AS CumulativeProportionOfWarehouseTime\n    FROM statement_attribution\n)\n\nSELECT \ns.*,\nStatementTaskTimeProportion*100 AS StatementWarehouseTimePercentage,\nCASE WHEN s.CumulativeProportionOfWarehouseTime <= :query_pareto::float THEN s.statement_text ELSE 'Remaining Long Tail of Queries' END AS QueryProportionParetoFlag\nFROM statement_rollup_cumulative_sum s\nORDER BY CumulativeProportionOfWarehouseTime",
+      "query": "/*\nTO DO: \n1. Make Query Tagging Multi-dimensional\n\n\n*/\n\n\nWITH history AS (\nSELECT\nstatement_id,\nexecuted_by,\nstatement_text,\nwarehouse_id,\nexecution_status,\nf.statement_type,\ntry_divide(total_duration_ms, 1000) AS QueryRuntimeSeconds,\ntry_divide(total_task_duration_ms, 1000) AS CPUTotalExecutionTime,\ntry_divide(execution_duration_ms, 1000) AS ExecutionQueryTime,\ntry_divide(compilation_duration_ms, 1000) AS CompilationQueryTime,\ntry_divide(waiting_at_capacity_duration_ms, 1000) AS QueueQueryTime,\ntry_divide(waiting_for_compute_duration_ms, 1000) AS StartUpQueryTime,\ntry_divide(result_fetch_duration_ms, 1000) AS ResultFetchTime,\nstart_time,\nend_time,\nCOALESCE(total_task_duration_ms / execution_duration_ms, NULL) AS TotalCPUTime_To_Execution_Time_Ratio,\nCOALESCE(waiting_at_capacity_duration_ms / total_duration_ms, 0) AS ProportionQueueTime,\nAVG(COALESCE(total_task_duration_ms / execution_duration_ms, NULL)) OVER () AS AvgTaskSkewRatio,\nAVG(try_divide(total_duration_ms, 1000))  OVER () AS AvgQueryRuntime,\nAVG(try_divide(waiting_at_capacity_duration_ms, 1000)) OVER () AS AvgQueueTime,\nAVG(COALESCE(try_divide(waiting_at_capacity_duration_ms, 1000) / try_divide(total_duration_ms, 1000), 0)) OVER () AS AvgProportionTimeQueueing,\nSUM(try_divide(total_duration_ms, 1000)) OVER () AS TotalUsedTimeInWarehouse,\nSUM(try_divide(total_duration_ms, 1000)) OVER (PARTITION BY statement_text) AS TotalStatementTextTimeUsed, -- for query level aggregates\ntry_divide(try_divide(total_duration_ms, 1000) , TotalUsedTimeInWarehouse) AS ProportionOfWarehouseTimeUsedByQuery,\n-- Query Tagging\nregexp_replace(regexp_extract(statement_text, '--QUERY_TAG:(.*?)(\\r\\n|\\n|$)' , 0), '--QUERY_TAG:', '') AS raw_tagged\n-- Can use this to chargeback (as long as you know denominator is only USED task time, not including idele time)\nFROM system.query.history f\nWHERE warehouse_id = :warehouse_id\nAND (start_time >= :start_time AND end_time <= :end_time) -- Must pushdown these filters for accurate % aggregates by warehouse\nAND total_duration_ms > 0\nAND statement_type IS NOT NULL\n),\n\n-- Warehosue Costs for the same query window \nfiltered_warehouse_usage AS (\n        -- This is to properly handle attributing partial hours/seconds and match it to the seleted query window\n\n        WITH trimmed_usage AS (\n        SELECT \n        -- Start Time Range Trimming\n        timestampdiff(SECOND, usage_start_time, :start_time)::float AS seconds_before_start_range,\n        timestampdiff(SECOND, usage_start_time, usage_end_time)::float AS full_start_range_length,\n        full_start_range_length - seconds_before_start_range AS seconds_remaining_in_original_start_range,\n        greatest(:start_time, usage_start_time) AS trimmed_start_time,\n        -- End Time Range Trimming\n        least(:end_time, usage_end_time) AS trimmed_end_time,\n        timestampdiff(SECOND, :end_time, usage_end_time)::float AS seconds_after_end_range,\n        timestampdiff(SECOND, usage_start_time, usage_end_time)::float AS full_end_range_length,\n        full_end_range_length - seconds_after_end_range AS seconds_remaining_in_original_end_range,\n\n        -- Calculate trim proportion to multiple DBUs by proportion of the full hour in the active window\n        try_divide(CASE WHEN seconds_before_start_range > 0 THEN (full_start_range_length - seconds_before_start_range) ELSE NULL END, full_start_range_length) AS StartTrimProportion,\n        try_divide(CASE WHEN seconds_after_end_range > 0 THEN (full_start_range_length - seconds_after_end_range) ELSE NULL END, full_start_range_length) AS EndTrimProportion,\n        COALESCE(COALESCE(EndTrimProportion, StartTrimProportion), 1) AS TrimProportion,\n        usage_start_time,\n        usage_end_time,\n        usage_quantity AS dbus,\n        usage_metadata.warehouse_id AS warehouse_id\n        FROM system.billing.usage\n        WHERE usage_metadata.warehouse_id = :warehouse_id\n        AND usage_unit = 'DBU'\n        AND (\n        (usage_start_time BETWEEN :start_time::timestamp AND :end_time::timestamp)\n        OR (usage_end_time BETWEEN :start_time::timestamp AND :end_time::timestamp)\n        )\n        )\n\n        SELECT \n        warehouse_id,\n        SUM(dbus*TrimProportion) AS Total_Warehouse_Period_DBUs,\n        SUM(dbus*TrimProportion*:cluster_unit_price::float) AS Total_Warehouse_Period_Dollars\n        FROM trimmed_usage\n        GROUP BY warehouse_id\n),\n\nhistory_with_pricing AS (\nSELECT \nh1.*,\nwh.Total_Warehouse_Period_DBUs, \nwh.Total_Warehouse_Period_Dollars\nFROM history AS h1\nLEFT JOIN filtered_warehouse_usage AS wh ON h1.warehouse_id = wh.warehouse_id\n),\n\n\nquery_proportion_agg AS (\n-- Cumulative Sum by statement_text (not query id, but distinct statement)\nSELECT \n-- We do this to \nsha2(regexp_replace(regexp_replace(REGEXP_REPLACE(statement_text, '/\\\\*.*?\\\\*/', ''), '(--[^\\\\n]*)', ''), ' ', ''), 256) AS query_signature,\nMAX(statement_text) AS statement_text,\nMAX(raw_tagged) AS raw_tagged,\nCOUNT(statement_id) AS NumberOfExecutions,\nAVG(QueryRuntimeSeconds) AS AvgRuntimeInSeconds,\nMAX(TotalUsedTimeInWarehouse) AS TotalWarehouseTimeUsed,\nMAX(Total_Warehouse_Period_DBUs) AS Total_Warehouse_Period_DBUs,\nMAX(Total_Warehouse_Period_Dollars) AS Total_Warehouse_Period_Dollars,\nSUM(QueryRuntimeSeconds) AS TotalStatementTimeUsed,\nARRAY_DISTINCT(COLLECT_LIST(NAMED_STRUCT('user', executed_by, 'execution_count', (SELECT COUNT(statement_id) FROM history AS in_hist WHERE in_hist.executed_by = u.executed_by AND in_hist.statement_text = u.statement_text)))) AS UserRunCounts\nFROM history_with_pricing AS u\nGROUP BY query_signature\n),\n\nstatement_attribution AS (\nSELECT \na.*,\ntry_divide(TotalStatementTimeUsed, TotalWarehouseTimeUsed) AS StatementTaskTimeProportion,\nTotal_Warehouse_Period_Dollars*StatementTaskTimeProportion AS StatementAllocatedDollars,\nTotal_Warehouse_Period_DBUs*StatementTaskTimeProportion AS StatementAllocatedDBUs\nFROM query_proportion_agg a\n),\n\nstatement_rollup_cumulative_sum AS (\n    SELECT \n    *,\n    SUM(StatementTaskTimeProportion) OVER (ORDER BY StatementTaskTimeProportion DESC) AS CumulativeProportionOfWarehouseTime\n    FROM statement_attribution\n)\n\nSELECT \ns.*,\nStatementTaskTimeProportion*100 AS StatementWarehouseTimePercentage,\nCASE WHEN length(raw_tagged) >= 1 THEN raw_tagged ELSE 'Untagged' END AS QueryTag,\nCASE WHEN s.CumulativeProportionOfWarehouseTime <= :query_pareto::float THEN s.statement_text ELSE 'Remaining Long Tail of Queries' END AS QueryProportionParetoFlag\nFROM statement_rollup_cumulative_sum s\nORDER BY CumulativeProportionOfWarehouseTime",
       "parameters": [
+        {
+          "displayName": "query_pareto",
+          "keyword": "query_pareto",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "0.5"
+                }
+              ]
+            }
+          }
+        },
         {
           "displayName": "warehouse_id",
           "keyword": "warehouse_id",
@@ -216,21 +231,6 @@
               "values": [
                 {
                   "value": "2024-03-26T09:31:22.000Z"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "displayName": "query_pareto",
-          "keyword": "query_pareto",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": [
-                {
-                  "value": "0.5"
                 }
               ]
             }
@@ -335,7 +335,7 @@
             }
           },
           "position": {
-            "x": 3,
+            "x": 4,
             "y": 36,
             "width": 1,
             "height": 2
@@ -435,7 +435,7 @@
           },
           "position": {
             "x": 0,
-            "y": 70,
+            "y": 76,
             "width": 3,
             "height": 6
           }
@@ -496,6 +496,10 @@
                     {
                       "name": "QueryRuntimeSeconds",
                       "expression": "`QueryRuntimeSeconds`"
+                    },
+                    {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
                     },
                     {
                       "name": "QueueQueryTime",
@@ -691,7 +695,7 @@
                     "displayName": "AllocatedQueryCostByTime"
                   },
                   {
-                    "fieldName": "ProblemQueryMetric",
+                    "fieldName": "QueryRuntimeSeconds",
                     "numberFormat": "0.00",
                     "booleanValues": [
                       "false",
@@ -709,6 +713,34 @@
                     "displayAs": "number",
                     "visible": true,
                     "order": 2,
+                    "title": "Runtime (s)",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "QueryRuntimeSeconds"
+                  },
+                  {
+                    "fieldName": "ProblemQueryMetric",
+                    "numberFormat": "0.00",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 3,
                     "title": "Problem Query Metric (higher is worse",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -747,6 +779,33 @@
                     "displayName": "ProblemQueryMetric"
                   },
                   {
+                    "fieldName": "QueryTag",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "QueryTag",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "QueryTag"
+                  },
+                  {
                     "fieldName": "QueryEfficiencyRatio",
                     "numberFormat": "0.00",
                     "booleanValues": [
@@ -764,7 +823,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 3,
+                    "order": 5,
                     "title": "Efficiency Ratio (Experimental)",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -774,34 +833,6 @@
                     "preserveWhitespace": false,
                     "description": "EXPERIMENTAL - Ratio of Execution Time to Total CPU Time (higher is worse)",
                     "displayName": "QueryEfficiencyRatio"
-                  },
-                  {
-                    "fieldName": "QueryRuntimeSeconds",
-                    "numberFormat": "0.00",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "float",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 4,
-                    "title": "Runtime (s)",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "QueryRuntimeSeconds"
                   },
                   {
                     "fieldName": "statement_text",
@@ -820,7 +851,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 5,
+                    "order": 6,
                     "title": "Query",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -847,7 +878,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 9,
+                    "order": 10,
                     "title": "execution_status",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -874,7 +905,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 10,
+                    "order": 11,
                     "title": "statement_type",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -901,7 +932,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 11,
+                    "order": 12,
                     "title": "executed_by",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -929,7 +960,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 12,
+                    "order": 13,
                     "title": "CPUTotalExecutionTime",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -957,7 +988,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 13,
+                    "order": 14,
                     "title": "ExecutionQueryTime",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -985,7 +1016,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 14,
+                    "order": 15,
                     "title": "CompilationQueryTime",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1013,7 +1044,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 15,
+                    "order": 16,
                     "title": "QueueQueryTime",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1041,7 +1072,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 16,
+                    "order": 17,
                     "title": "StartUpQueryTime",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1069,7 +1100,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 17,
+                    "order": 18,
                     "title": "ResultFetchTime",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1097,7 +1128,7 @@
                     "type": "datetime",
                     "displayAs": "datetime",
                     "visible": true,
-                    "order": 18,
+                    "order": 20,
                     "title": "start_time",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1125,7 +1156,7 @@
                     "type": "datetime",
                     "displayAs": "datetime",
                     "visible": true,
-                    "order": 19,
+                    "order": 21,
                     "title": "end_time",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1153,7 +1184,7 @@
                     "type": "datetime",
                     "displayAs": "datetime",
                     "visible": true,
-                    "order": 20,
+                    "order": 22,
                     "title": "update_time",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1181,7 +1212,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 21,
+                    "order": 23,
                     "title": "TotalCPUTime_To_Execution_Time_Ratio",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1209,7 +1240,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 22,
+                    "order": 24,
                     "title": "ProportionQueueTime",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1237,7 +1268,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 23,
+                    "order": 25,
                     "title": "read_bytes",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1265,7 +1296,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 24,
+                    "order": 26,
                     "title": "read_io_cache_percent",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1292,7 +1323,7 @@
                     "type": "boolean",
                     "displayAs": "boolean",
                     "visible": true,
-                    "order": 25,
+                    "order": 27,
                     "title": "from_result_cache",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1320,7 +1351,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 26,
+                    "order": 28,
                     "title": "spilled_local_bytes",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1348,7 +1379,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 33,
+                    "order": 34,
                     "title": "ReadDataAmountInGB",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1375,7 +1406,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 34,
+                    "order": 35,
                     "title": "ReadDataFlag",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -1402,7 +1433,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 35,
+                    "order": 36,
                     "title": "UsedWorkerTasksFlag",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -1429,7 +1460,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 36,
+                    "order": 37,
                     "title": "LongRunningQueryFlag",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -1457,7 +1488,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 37,
+                    "order": 38,
                     "title": "WarehouseAvgTaskToExecutionTimeRatio",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1485,7 +1516,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 45,
+                    "order": 46,
                     "title": "CachePercentZScore",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -1512,7 +1543,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 46,
+                    "order": 47,
                     "title": "HasSpillFlag",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -1539,7 +1570,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 51,
+                    "order": 52,
                     "title": "UsedCacheFlag",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -1566,7 +1597,7 @@
                     "type": "string",
                     "displayAs": "string",
                     "visible": true,
-                    "order": 52,
+                    "order": 53,
                     "title": "HighDataVolumeFlag",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -1596,7 +1627,7 @@
                   "name": "SpillAmountZScore",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 6,
+                  "order": 7,
                   "title": "SpillAmountZScore",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1622,7 +1653,7 @@
                   "name": "DataVolumeZScore",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 7,
+                  "order": 8,
                   "title": "DataVolumeZScore",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1647,7 +1678,7 @@
                   "name": "warehouse_id",
                   "type": "string",
                   "displayAs": "string",
-                  "order": 8,
+                  "order": 9,
                   "title": "warehouse_id",
                   "allowSearch": false,
                   "alignContent": "left",
@@ -1670,10 +1701,36 @@
                   "linkTextTemplate": "{{ @ }}",
                   "linkTitleTemplate": "{{ @ }}",
                   "linkOpenInNewTab": true,
+                  "name": "WarehouseAvgQueryRuntime",
+                  "type": "float",
+                  "displayAs": "number",
+                  "order": 19,
+                  "title": "WarehouseAvgQueryRuntime",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0.00",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
                   "name": "TotalUsedTimeInWarehouse",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 27,
+                  "order": 29,
                   "title": "TotalUsedTimeInWarehouse",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1699,7 +1756,7 @@
                   "name": "TotalStatementTextTimeUsed",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 28,
+                  "order": 30,
                   "title": "TotalStatementTextTimeUsed",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1725,34 +1782,8 @@
                   "name": "ProportionOfWarehouseTimeUsedByQuery",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 29,
+                  "order": 31,
                   "title": "ProportionOfWarehouseTimeUsedByQuery",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "numberFormat": "0.00",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "WarehouseAvgQueryRuntime",
-                  "type": "float",
-                  "displayAs": "number",
-                  "order": 30,
-                  "title": "WarehouseAvgQueryRuntime",
                   "allowSearch": false,
                   "alignContent": "right",
                   "allowHTML": false,
@@ -1777,7 +1808,7 @@
                   "name": "WarehouseAvgQueueTime",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 31,
+                  "order": 32,
                   "title": "WarehouseAvgQueueTime",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1803,7 +1834,7 @@
                   "name": "WarehouseAvgProportionTimeQueueing",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 32,
+                  "order": 33,
                   "title": "WarehouseAvgProportionTimeQueueing",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1829,7 +1860,7 @@
                   "name": "WarehouseAvgReadDataInGBPerQuery",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 38,
+                  "order": 39,
                   "title": "WarehouseAvgReadDataInGBPerQuery",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1855,7 +1886,7 @@
                   "name": "WarehouseStdReadDataInGBPerQuery",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 39,
+                  "order": 40,
                   "title": "WarehouseStdReadDataInGBPerQuery",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1881,7 +1912,7 @@
                   "name": "WarehouseAvgDeltaCachePercent",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 40,
+                  "order": 41,
                   "title": "WarehouseAvgDeltaCachePercent",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1907,7 +1938,7 @@
                   "name": "WarehouseStdDeltaCachePercent",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 41,
+                  "order": 42,
                   "title": "WarehouseStdDeltaCachePercent",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1933,7 +1964,7 @@
                   "name": "WarehouseAvgDiskSpillAmount",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 42,
+                  "order": 43,
                   "title": "WarehouseAvgDiskSpillAmount",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1959,7 +1990,7 @@
                   "name": "WarehouseStdDiskSpillAmount",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 43,
+                  "order": 44,
                   "title": "WarehouseStdDiskSpillAmount",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1985,7 +2016,7 @@
                   "name": "WarehouseAvgQueryEfficiencyRatio",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 44,
+                  "order": 45,
                   "title": "WarehouseAvgQueryEfficiencyRatio",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2011,7 +2042,7 @@
                   "name": "Calc_HasSpillFlag",
                   "type": "integer",
                   "displayAs": "number",
-                  "order": 47,
+                  "order": 48,
                   "title": "Calc_HasSpillFlag",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2036,7 +2067,7 @@
                   "name": "Calc_ReadDataFlag",
                   "type": "decimal",
                   "displayAs": "number",
-                  "order": 48,
+                  "order": 49,
                   "title": "Calc_ReadDataFlag",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2061,7 +2092,7 @@
                   "name": "Calc_UsedWorkerTasksFlag",
                   "type": "decimal",
                   "displayAs": "number",
-                  "order": 49,
+                  "order": 50,
                   "title": "Calc_UsedWorkerTasksFlag",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2087,7 +2118,7 @@
                   "name": "Calc_LongRunningQueryFlag",
                   "type": "integer",
                   "displayAs": "number",
-                  "order": 50,
+                  "order": 51,
                   "title": "Calc_LongRunningQueryFlag",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2113,7 +2144,7 @@
                   "name": "Calc_HighDataVolumeFlag",
                   "type": "integer",
                   "displayAs": "number",
-                  "order": 53,
+                  "order": 54,
                   "title": "Calc_HighDataVolumeFlag",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2139,10 +2170,35 @@
                   "name": "Total_Warehouse_Period_Dollars",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 54,
+                  "order": 55,
                   "title": "Total_Warehouse_Period_Dollars",
                   "allowSearch": false,
                   "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "raw_tagged",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 56,
+                  "title": "raw_tagged",
+                  "allowSearch": false,
+                  "alignContent": "left",
                   "allowHTML": false,
                   "highlightLinks": false,
                   "useMonospaceFont": false,
@@ -2165,7 +2221,7 @@
                   "name": "QueryRuntime_P50",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 100052,
+                  "order": 57,
                   "title": "QueryRuntime_P50",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2191,7 +2247,7 @@
                   "name": "QueryRuntime_P90",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 100053,
+                  "order": 58,
                   "title": "QueryRuntime_P90",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2217,7 +2273,7 @@
                   "name": "QueryRuntime_P95",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 100054,
+                  "order": 59,
                   "title": "QueryRuntime_P95",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2243,7 +2299,7 @@
                   "name": "QueryRuntime_P99",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 100055,
+                  "order": 60,
                   "title": "QueryRuntime_P99",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2269,7 +2325,7 @@
                   "name": "QueryQueueTime_P50",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 100056,
+                  "order": 61,
                   "title": "QueryQueueTime_P50",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2295,7 +2351,7 @@
                   "name": "QueryQueueTime_P90",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 100057,
+                  "order": 62,
                   "title": "QueryQueueTime_P90",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2321,7 +2377,7 @@
                   "name": "QueryQueueTime_P95",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 100058,
+                  "order": 63,
                   "title": "QueryQueueTime_P95",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2347,7 +2403,7 @@
                   "name": "QueryQueueTime_P99",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 100059,
+                  "order": 64,
                   "title": "QueryQueueTime_P99",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -2372,7 +2428,7 @@
           },
           "position": {
             "x": 0,
-            "y": 89,
+            "y": 97,
             "width": 6,
             "height": 8
           }
@@ -2386,6 +2442,10 @@
                 "query": {
                   "datasetName": "47328a9c",
                   "fields": [
+                    {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
+                    },
                     {
                       "name": "avg(QueryRuntimeSeconds)",
                       "expression": "AVG(`QueryRuntimeSeconds`)"
@@ -2422,6 +2482,13 @@
                     }
                   },
                   "displayName": "Avgerage Runtime (s)"
+                },
+                "color": {
+                  "fieldName": "QueryTag",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "QueryTag"
                 }
               },
               "frame": {
@@ -2446,7 +2513,7 @@
           },
           "position": {
             "x": 0,
-            "y": 43,
+            "y": 49,
             "width": 4,
             "height": 6
           }
@@ -2493,7 +2560,7 @@
           },
           "position": {
             "x": 2,
-            "y": 62,
+            "y": 68,
             "width": 1,
             "height": 2
           }
@@ -2689,7 +2756,7 @@
           },
           "position": {
             "x": 0,
-            "y": 55,
+            "y": 61,
             "width": 3,
             "height": 6
           }
@@ -2888,7 +2955,7 @@
           },
           "position": {
             "x": 4,
-            "y": 62,
+            "y": 68,
             "width": 2,
             "height": 2
           }
@@ -2930,7 +2997,7 @@
           },
           "position": {
             "x": 3,
-            "y": 98,
+            "y": 106,
             "width": 1,
             "height": 2
           }
@@ -2972,7 +3039,7 @@
           },
           "position": {
             "x": 1,
-            "y": 98,
+            "y": 106,
             "width": 1,
             "height": 2
           }
@@ -3011,7 +3078,7 @@
             }
           },
           "position": {
-            "x": 2,
+            "x": 3,
             "y": 36,
             "width": 1,
             "height": 2
@@ -3190,7 +3257,7 @@
           },
           "position": {
             "x": 0,
-            "y": 64,
+            "y": 70,
             "width": 3,
             "height": 6
           }
@@ -3244,46 +3311,6 @@
         },
         {
           "widget": {
-            "name": "52c5e320",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "47328a9c",
-                  "fields": [
-                    {
-                      "name": "avg(ProportionQueueTime)",
-                      "expression": "AVG(`ProportionQueueTime`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "avg(ProportionQueueTime)",
-                  "displayName": "Average ProportionQueueTime"
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "% Time Queued"
-              }
-            }
-          },
-          "position": {
-            "x": 4,
-            "y": 36,
-            "width": 1,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
             "name": "53511525",
             "queries": [
               {
@@ -3321,7 +3348,7 @@
           },
           "position": {
             "x": 4,
-            "y": 98,
+            "y": 106,
             "width": 2,
             "height": 2
           }
@@ -3409,7 +3436,7 @@
           },
           "position": {
             "x": 3,
-            "y": 70,
+            "y": 76,
             "width": 3,
             "height": 6
           }
@@ -3456,6 +3483,9 @@
                     "type": "categorical"
                   },
                   "displayName": "executed_by"
+                },
+                "label": {
+                  "show": true
                 }
               },
               "frame": {
@@ -3466,9 +3496,95 @@
           },
           "position": {
             "x": 2,
-            "y": 76,
+            "y": 82,
             "width": 2,
             "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "5a486a88",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a5ac741d",
+                  "fields": [
+                    {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
+                    },
+                    {
+                      "name": "sum(StatementTaskTimeProportion)",
+                      "expression": "SUM(`StatementTaskTimeProportion`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "QueryTag",
+                  "axis": {
+                    "hideLabels": true,
+                    "title": "Query Tag"
+                  },
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Query Tag"
+                },
+                "y": {
+                  "fieldName": "sum(StatementTaskTimeProportion)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "% of Total Warehouse Compute Time"
+                },
+                "color": {
+                  "fieldName": "QueryTag",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Remaining Long Tail of Queries",
+                        "color": "#919191"
+                      },
+                      {
+                        "value": "Untagged",
+                        "color": "#039fce"
+                      }
+                    ]
+                  },
+                  "legend": {
+                    "position": "bottom"
+                  },
+                  "displayName": "Query Tag"
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "Query Warehouse Time By Tag",
+                "description": "Query Statement Sorted By % of total warehouse time - i.e. \"How much % of total compute time did query X take up?\""
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 116,
+            "width": 6,
+            "height": 8
           }
         },
         {
@@ -3490,7 +3606,7 @@
           },
           "position": {
             "x": 0,
-            "y": 61,
+            "y": 67,
             "width": 6,
             "height": 1
           }
@@ -3532,7 +3648,7 @@
           },
           "position": {
             "x": 2,
-            "y": 98,
+            "y": 106,
             "width": 1,
             "height": 2
           }
@@ -3579,7 +3695,7 @@
           },
           "position": {
             "x": 1,
-            "y": 62,
+            "y": 68,
             "width": 1,
             "height": 2
           }
@@ -3741,7 +3857,7 @@
           },
           "position": {
             "x": 0,
-            "y": 62,
+            "y": 68,
             "width": 1,
             "height": 2
           }
@@ -3780,7 +3896,7 @@
             }
           },
           "position": {
-            "x": 1,
+            "x": 2,
             "y": 36,
             "width": 1,
             "height": 2
@@ -3905,7 +4021,7 @@
           },
           "position": {
             "x": 0,
-            "y": 100,
+            "y": 108,
             "width": 6,
             "height": 8
           }
@@ -4055,7 +4171,54 @@
           },
           "position": {
             "x": 0,
-            "y": 98,
+            "y": 106,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "a5de5798",
+            "queries": [
+              {
+                "name": "dashboards/01eee4980f461d848d978ef2b00c7f1a/datasets/01eee49819aa10ef846adf03db1ca1e8_QueryTag",
+                "query": {
+                  "datasetName": "47328a9c",
+                  "fields": [
+                    {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
+                    },
+                    {
+                      "name": "QueryTag_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "QueryTag",
+                    "displayName": "QueryTag",
+                    "queryName": "dashboards/01eee4980f461d848d978ef2b00c7f1a/datasets/01eee49819aa10ef846adf03db1ca1e8_QueryTag"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Query Tag"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 36,
             "width": 1,
             "height": 2
           }
@@ -4067,7 +4230,7 @@
           },
           "position": {
             "x": 0,
-            "y": 97,
+            "y": 105,
             "width": 6,
             "height": 1
           }
@@ -4092,6 +4255,10 @@
                     {
                       "name": "QueryProportionParetoFlag",
                       "expression": "`QueryProportionParetoFlag`"
+                    },
+                    {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
                     },
                     {
                       "name": "StatementAllocatedDBUs",
@@ -4128,7 +4295,7 @@
               "encodings": {
                 "columns": [
                   {
-                    "fieldName": "statement_text",
+                    "fieldName": "QueryTag",
                     "booleanValues": [
                       "false",
                       "true"
@@ -4145,6 +4312,33 @@
                     "displayAs": "string",
                     "visible": true,
                     "order": 0,
+                    "title": "QueryTag",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "QueryTag"
+                  },
+                  {
+                    "fieldName": "statement_text",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
                     "title": "Query",
                     "allowSearch": true,
                     "alignContent": "left",
@@ -4189,7 +4383,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 1,
+                    "order": 2,
                     "title": "Allocated Cost ($)",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -4223,7 +4417,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 2,
+                    "order": 3,
                     "title": "Allocated DBUs",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -4251,7 +4445,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 3,
+                    "order": 4,
                     "title": "% of Warehouse Execution Time",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -4285,7 +4479,7 @@
                     "type": "integer",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 4,
+                    "order": 5,
                     "title": "# Executions",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -4313,7 +4507,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 5,
+                    "order": 6,
                     "title": "Avg Runtime (s)",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -4346,7 +4540,7 @@
                     "type": "complex",
                     "displayAs": "json",
                     "visible": true,
-                    "order": 6,
+                    "order": 7,
                     "title": "User Run Breakdown",
                     "allowSearch": false,
                     "alignContent": "left",
@@ -4375,7 +4569,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 8,
+                    "order": 9,
                     "title": "TotalStatementTimeUsed",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -4411,7 +4605,7 @@
                   "name": "TotalWarehouseTimeUsed",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 7,
+                  "order": 8,
                   "title": "TotalWarehouseTimeUsed",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -4437,7 +4631,7 @@
                   "name": "StatementTaskTimeProportion",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 9,
+                  "order": 10,
                   "title": "StatementTaskTimeProportion",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -4469,7 +4663,7 @@
                   "name": "CumulativeProportionOfWarehouseTime",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 10,
+                  "order": 11,
                   "title": "CumulativeProportionOfWarehouseTime",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -4494,7 +4688,7 @@
                   "name": "QueryProportionParetoFlag",
                   "type": "string",
                   "displayAs": "string",
-                  "order": 11,
+                  "order": 12,
                   "title": "QueryProportionParetoFlag",
                   "allowSearch": false,
                   "alignContent": "left",
@@ -4520,7 +4714,7 @@
                   "name": "Total_Warehouse_Period_DBUs",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 12,
+                  "order": 13,
                   "title": "Total_Warehouse_Period_DBUs",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -4546,10 +4740,60 @@
                   "name": "Total_Warehouse_Period_Dollars",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 13,
+                  "order": 14,
                   "title": "Total_Warehouse_Period_Dollars",
                   "allowSearch": false,
                   "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "query_signature",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 15,
+                  "title": "query_signature",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "raw_tagged",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 16,
+                  "title": "raw_tagged",
+                  "allowSearch": false,
+                  "alignContent": "left",
                   "allowHTML": false,
                   "highlightLinks": false,
                   "useMonospaceFont": false,
@@ -4571,7 +4815,7 @@
           },
           "position": {
             "x": 0,
-            "y": 108,
+            "y": 124,
             "width": 6,
             "height": 9
           }
@@ -4664,7 +4908,7 @@
           },
           "position": {
             "x": 4,
-            "y": 43,
+            "y": 49,
             "width": 2,
             "height": 6
           }
@@ -4715,7 +4959,7 @@
             }
           },
           "position": {
-            "x": 0,
+            "x": 1,
             "y": 36,
             "width": 1,
             "height": 2
@@ -4773,10 +5017,10 @@
                   "scale": {
                     "type": "categorical"
                   },
-                  "displayName": "Statement Type",
                   "legend": {
                     "position": "bottom"
-                  }
+                  },
+                  "displayName": "Statement Type"
                 },
                 "label": {
                   "show": false
@@ -4792,7 +5036,7 @@
           },
           "position": {
             "x": 3,
-            "y": 38,
+            "y": 44,
             "width": 3,
             "height": 5
           }
@@ -4807,16 +5051,16 @@
                   "datasetName": "47328a9c",
                   "fields": [
                     {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
+                    },
+                    {
                       "name": "avg(QueueQueryTime)",
                       "expression": "AVG(`QueueQueryTime`)"
                     },
                     {
                       "name": "hourly(start_time)",
                       "expression": "DATE_TRUNC(\"HOUR\", `start_time`)"
-                    },
-                    {
-                      "name": "max(WarehouseAvgQueueTime)",
-                      "expression": "MAX(`WarehouseAvgQueueTime`)"
                     }
                   ],
                   "disaggregated": false
@@ -4824,8 +5068,8 @@
               }
             ],
             "spec": {
-              "version": 1,
-              "widgetType": "combo",
+              "version": 3,
+              "widgetType": "line",
               "encodings": {
                 "x": {
                   "fieldName": "hourly(start_time)",
@@ -4838,47 +5082,19 @@
                   "displayName": "Start Time"
                 },
                 "y": {
-                  "primary": {
-                    "fields": [
-                      {
-                        "fieldName": "avg(QueueQueryTime)",
-                        "displayName": "Avg Query Queue Time (s)"
-                      }
-                    ]
-                  },
-                  "secondary": {
-                    "fields": [
-                      {
-                        "fieldName": "max(WarehouseAvgQueueTime)",
-                        "displayName": "Warehouse Average Queue Time (s)"
-                      }
-                    ]
-                  },
+                  "fieldName": "avg(QueueQueryTime)",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "axis": {
-                    "title": "Queue Time (s)"
-                  }
+                  "displayName": "Avg Query Queue Time (s)"
                 },
                 "color": {
-                  "legend": {
-                    "position": "bottom"
-                  }
+                  "fieldName": "QueryTag",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "QueryTag"
                 }
-              },
-              "mark": {
-                "colors": [
-                  "#2672cb",
-                  "#00A972",
-                  "#FF3621",
-                  "#8BCAE7",
-                  "#AB4057",
-                  "#99DDB4",
-                  "#FCA4A1",
-                  "#919191",
-                  "#BF7080"
-                ]
               },
               "frame": {
                 "showTitle": true,
@@ -4888,8 +5104,77 @@
           },
           "position": {
             "x": 0,
-            "y": 49,
+            "y": 55,
             "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c201bfdf",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "47328a9c",
+                  "fields": [
+                    {
+                      "name": "avg(QueryRuntimeSeconds)",
+                      "expression": "AVG(`QueryRuntimeSeconds`)"
+                    },
+                    {
+                      "name": "execution_status",
+                      "expression": "`execution_status`"
+                    },
+                    {
+                      "name": "statement_type",
+                      "expression": "`statement_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "execution_status",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Execution Status"
+                },
+                "y": {
+                  "fieldName": "statement_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Statement Type"
+                },
+                "color": {
+                  "fieldName": "avg(QueryRuntimeSeconds)",
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "scheme",
+                      "scheme": "greenblue"
+                    }
+                  },
+                  "displayName": "Avg Query Runtime"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Query Runtime By Statement Type, Status"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 38,
+            "width": 3,
             "height": 6
           }
         },
@@ -4935,6 +5220,9 @@
                     "type": "categorical"
                   },
                   "displayName": "executed_by"
+                },
+                "label": {
+                  "show": true
                 }
               },
               "frame": {
@@ -4945,7 +5233,7 @@
           },
           "position": {
             "x": 4,
-            "y": 76,
+            "y": 82,
             "width": 2,
             "height": 7
           }
@@ -5176,7 +5464,7 @@
           },
           "position": {
             "x": 3,
-            "y": 64,
+            "y": 70,
             "width": 3,
             "height": 6
           }
@@ -5265,7 +5553,7 @@
           },
           "position": {
             "x": 0,
-            "y": 38,
+            "y": 44,
             "width": 3,
             "height": 5
           }
@@ -5314,6 +5602,120 @@
         },
         {
           "widget": {
+            "name": "d2b09d07",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "47328a9c",
+                  "fields": [
+                    {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
+                    },
+                    {
+                      "name": "sum(ExecutionQueryTime)",
+                      "expression": "SUM(`ExecutionQueryTime`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(ExecutionQueryTime)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Query Execution Time (s)"
+                },
+                "y": {
+                  "fieldName": "QueryTag",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "QueryTag"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Allocated Query Cost By Tag"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 89,
+            "width": 2,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "d55a94f7",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "47328a9c",
+                  "fields": [
+                    {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
+                    },
+                    {
+                      "name": "sum(AllocatedQueryCostByTime)",
+                      "expression": "SUM(`AllocatedQueryCostByTime`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(AllocatedQueryCostByTime)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Allocated Query Cost"
+                },
+                "y": {
+                  "fieldName": "QueryTag",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "QueryTag"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Allocated Query Cost By Tag"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 89,
+            "width": 2,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
             "name": "d6af9684",
             "queries": [
               {
@@ -5349,7 +5751,7 @@
           },
           "position": {
             "x": 3,
-            "y": 62,
+            "y": 68,
             "width": 1,
             "height": 2
           }
@@ -5364,16 +5766,16 @@
                   "datasetName": "47328a9c",
                   "fields": [
                     {
-                      "name": "avg(QueryEfficiencyRatio)",
-                      "expression": "AVG(`QueryEfficiencyRatio`)"
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     },
                     {
                       "name": "hourly(start_time)",
                       "expression": "DATE_TRUNC(\"HOUR\", `start_time`)"
-                    },
-                    {
-                      "name": "max(WarehouseAvgQueryEfficiencyRatio)",
-                      "expression": "MAX(`WarehouseAvgQueryEfficiencyRatio`)"
                     }
                   ],
                   "disaggregated": false
@@ -5381,38 +5783,9 @@
               }
             ],
             "spec": {
-              "version": 1,
-              "widgetType": "combo",
+              "version": 3,
+              "widgetType": "bar",
               "encodings": {
-                "y": {
-                  "primary": {
-                    "fields": [
-                      {
-                        "fieldName": "avg(QueryEfficiencyRatio)",
-                        "displayName": "Average QueryEfficiencyRatio"
-                      }
-                    ]
-                  },
-                  "secondary": {
-                    "fields": [
-                      {
-                        "fieldName": "max(WarehouseAvgQueryEfficiencyRatio)",
-                        "displayName": "Warehouse Avg"
-                      }
-                    ]
-                  },
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "axis": {
-                    "title": "Relative Skew Ratio"
-                  }
-                },
-                "color": {
-                  "legend": {
-                    "position": "bottom"
-                  }
-                },
                 "x": {
                   "fieldName": "hourly(start_time)",
                   "scale": {
@@ -5422,28 +5795,33 @@
                     "title": "Start Time"
                   },
                   "displayName": "Start Time"
+                },
+                "y": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Queries"
+                },
+                "color": {
+                  "fieldName": "QueryTag",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "QueryTag"
                 }
-              },
-              "mark": {
-                "colors": [
-                  "#AB4057",
-                  "#919191",
-                  "#FCA4A1",
-                  "#919191",
-                  "#BF7080"
-                ]
               },
               "frame": {
                 "showTitle": true,
-                "title": "Query Efficiency Ratio Trends (Experimental Metric)"
+                "title": "Queries Over Time By Tag"
               }
             }
           },
           "position": {
-            "x": 0,
-            "y": 83,
-            "width": 6,
-            "height": 6
+            "x": 4,
+            "y": 89,
+            "width": 2,
+            "height": 8
           }
         },
         {
@@ -5621,7 +5999,7 @@
           },
           "position": {
             "x": 4,
-            "y": 49,
+            "y": 55,
             "width": 2,
             "height": 6
           }
@@ -5703,7 +6081,7 @@
           },
           "position": {
             "x": 3,
-            "y": 55,
+            "y": 61,
             "width": 3,
             "height": 6
           }
@@ -5739,10 +6117,7 @@
                   "scale": {
                     "type": "quantitative"
                   },
-                  "axis": {
-                    "title": "Query Count"
-                  },
-                  "displayName": "Query Count"
+                  "displayName": "Count of Records"
                 },
                 "color": {
                   "fieldName": "executed_by",
@@ -5750,6 +6125,9 @@
                     "type": "categorical"
                   },
                   "displayName": "executed_by"
+                },
+                "label": {
+                  "show": true
                 }
               },
               "frame": {
@@ -5760,9 +6138,78 @@
           },
           "position": {
             "x": 0,
-            "y": 76,
+            "y": 82,
             "width": 2,
             "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "fa28712e",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "47328a9c",
+                  "fields": [
+                    {
+                      "name": "QueryTag",
+                      "expression": "`QueryTag`"
+                    },
+                    {
+                      "name": "avg(QueryRuntimeSeconds)",
+                      "expression": "AVG(`QueryRuntimeSeconds`)"
+                    },
+                    {
+                      "name": "execution_status",
+                      "expression": "`execution_status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "heatmap",
+              "encodings": {
+                "x": {
+                  "fieldName": "execution_status",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Execution Status"
+                },
+                "y": {
+                  "fieldName": "QueryTag",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Query Tag"
+                },
+                "color": {
+                  "fieldName": "avg(QueryRuntimeSeconds)",
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "scheme",
+                      "scheme": "greenblue"
+                    }
+                  },
+                  "displayName": "Avg Query Runtime"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Query Runtime By Tag, Execution Status"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 38,
+            "width": 3,
+            "height": 6
           }
         },
         {
