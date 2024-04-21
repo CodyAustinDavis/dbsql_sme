@@ -122,7 +122,7 @@
     {
       "name": "883a8202",
       "displayName": "Warehouse Billing",
-      "query": "\nWITH filtered_usage AS (SELECT \n*,\nusage_quantity*(:cluster_unit_price::float) AS UsageDollars\nFROM system.billing.usage\nWHERE usage_metadata.warehouse_id = :warehouse_id\n),\nusage_aggregated AS (\n  SELECT \n    date_trunc('hour', usage_start_time) AS usage_hour,\n    SUM(usage_quantity) AS UsageDBUs,\n    SUM(UsageDollars) AS UsageDollars\n  FROM filtered_usage \n  GROUP BY date_trunc('hour', usage_start_time)\n  ORDER BY usage_hour\n),\nsmoothed_usage AS (\nSELECT \n  usage_hour,\n  UsageDollars,\n  UsageDBUs,\n  AVG(UsageDollars) OVER (ORDER BY usage_hour ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) AS fast_moving_average,\n  AVG(UsageDollars) OVER (ORDER BY usage_hour ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) AS slow_moving_average\nFROM usage_aggregated\n),\npop_change AS (\nSELECT \n*,\nfast_moving_average - LAG(fast_moving_average, 12, 0) OVER (ORDER BY usage_hour) AS p12h_change,\nslow_moving_average - LAG(slow_moving_average, 24, 0) OVER (ORDER BY usage_hour) AS p24h_change\nFROM smoothed_usage\n),\n\nfinal_change AS (\nSELECT \n*,\nCOALESCE(ROUND(( try_divide(p12h_change , LAG(UsageDollars, 12, 0) OVER (ORDER BY usage_hour))) * 100, 2)::float, 0::float) AS p12h_change_percentage,\n ROUND((try_divide(p24h_change , LAG(UsageDollars, 24, 0) OVER (ORDER BY usage_hour))) * 100, 2)::float AS p24h_change_percentage\nFROM pop_change\n)\n\nSELECT \n*,\nCASE WHEN p12h_change_percentage > :12h_percent_increase::float THEN 1 ELSE 0 END AS HighIncreaseFlag -- i.e. greater than 20% increase period over period\nFROM final_change\n--ORDER BY usage_house DESC\n--LIMIT 1",
+      "query": "\nWITH filtered_usage AS (SELECT \n*,\nusage_quantity*(:cluster_unit_price::float) AS UsageDollars\nFROM system.billing.usage\nWHERE usage_metadata.warehouse_id = :warehouse_id\n),\nusage_aggregated AS (\n  SELECT \n    date_trunc('hour', usage_start_time) AS usage_hour,\n    SUM(usage_quantity) AS UsageDBUs,\n    SUM(UsageDollars) AS UsageDollars\n  FROM filtered_usage \n  GROUP BY date_trunc('hour', usage_start_time)\n  ORDER BY usage_hour\n),\nsmoothed_usage AS (\nSELECT \n  usage_hour,\n  UsageDollars,\n  UsageDBUs,\n  AVG(UsageDollars) OVER (ORDER BY usage_hour ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) AS fast_moving_average,\n  AVG(UsageDollars) OVER (ORDER BY usage_hour ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) AS slow_moving_average\nFROM usage_aggregated\n),\npop_change AS (\nSELECT \n*,\nfast_moving_average - LAG(fast_moving_average, 12, 0) OVER (ORDER BY usage_hour) AS p12h_change,\nslow_moving_average - LAG(slow_moving_average, 24, 0) OVER (ORDER BY usage_hour) AS p24h_change\nFROM smoothed_usage\n),\n\nfinal_change AS (\nSELECT \n*,\nCOALESCE(ROUND(( try_divide(p12h_change , LAG(UsageDollars, 12, 0) OVER (ORDER BY usage_hour))) * 100, 2)::float, 0::float) AS p12h_change_percentage,\n ROUND((try_divide(p24h_change , LAG(UsageDollars, 24, 0) OVER (ORDER BY usage_hour))) * 100, 2)::float AS p24h_change_percentage\nFROM pop_change\n)\n\nSELECT \n*,\nCASE WHEN p24h_change_percentage > :percent_increase::float THEN 'High Momentum' ELSE 'Within Range' END AS HighIncreaseFlag -- i.e. greater than 20% increase period over period\nFROM final_change\n--ORDER BY usage_house DESC\n--LIMIT 1",
       "parameters": [
         {
           "displayName": "warehouse_id",
@@ -155,8 +155,8 @@
           }
         },
         {
-          "displayName": "12h_percent_increase",
-          "keyword": "12h_percent_increase",
+          "displayName": "percent_increase",
+          "keyword": "percent_increase",
           "dataType": "STRING",
           "defaultSelection": {
             "values": {
@@ -336,7 +336,7 @@
           },
           "position": {
             "x": 4,
-            "y": 36,
+            "y": 40,
             "width": 1,
             "height": 2
           }
@@ -435,7 +435,7 @@
           },
           "position": {
             "x": 0,
-            "y": 78,
+            "y": 84,
             "width": 3,
             "height": 6
           }
@@ -488,10 +488,6 @@
                     {
                       "name": "ProportionQueueTime",
                       "expression": "`ProportionQueueTime`"
-                    },
-                    {
-                      "name": "QueryEfficiencyRatio",
-                      "expression": "`QueryEfficiencyRatio`"
                     },
                     {
                       "name": "QueryRuntimeSeconds",
@@ -723,6 +719,141 @@
                     "displayName": "QueryRuntimeSeconds"
                   },
                   {
+                    "fieldName": "QueryTag",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "QueryTag",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "QueryTag"
+                  },
+                  {
+                    "fieldName": "statement_text",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 5,
+                    "title": "Query",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "statement_text"
+                  },
+                  {
+                    "fieldName": "execution_status",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 9,
+                    "title": "execution_status",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "execution_status"
+                  },
+                  {
+                    "fieldName": "statement_type",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 10,
+                    "title": "statement_type",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "statement_type"
+                  },
+                  {
+                    "fieldName": "executed_by",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 11,
+                    "title": "executed_by",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "executed_by"
+                  },
+                  {
                     "fieldName": "ProblemQueryMetric",
                     "numberFormat": "0.00",
                     "booleanValues": [
@@ -740,7 +871,7 @@
                     "type": "float",
                     "displayAs": "number",
                     "visible": true,
-                    "order": 3,
+                    "order": 12,
                     "title": "Problem Query Metric (higher is worse",
                     "allowSearch": false,
                     "alignContent": "right",
@@ -779,170 +910,6 @@
                     "displayName": "ProblemQueryMetric"
                   },
                   {
-                    "fieldName": "QueryTag",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 4,
-                    "title": "QueryTag",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "QueryTag"
-                  },
-                  {
-                    "fieldName": "QueryEfficiencyRatio",
-                    "numberFormat": "0.00",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "float",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 5,
-                    "title": "Efficiency Ratio (Experimental)",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "description": "EXPERIMENTAL - Ratio of Execution Time to Total CPU Time (higher is worse)",
-                    "displayName": "QueryEfficiencyRatio"
-                  },
-                  {
-                    "fieldName": "statement_text",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 6,
-                    "title": "Query",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "statement_text"
-                  },
-                  {
-                    "fieldName": "execution_status",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 10,
-                    "title": "execution_status",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "execution_status"
-                  },
-                  {
-                    "fieldName": "statement_type",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 11,
-                    "title": "statement_type",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "statement_type"
-                  },
-                  {
-                    "fieldName": "executed_by",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 12,
-                    "title": "executed_by",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "executed_by"
-                  },
-                  {
                     "fieldName": "CPUTotalExecutionTime",
                     "numberFormat": "0",
                     "booleanValues": [
@@ -957,7 +924,7 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "type": "integer",
+                    "type": "float",
                     "displayAs": "number",
                     "visible": true,
                     "order": 13,
@@ -985,7 +952,7 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "type": "integer",
+                    "type": "float",
                     "displayAs": "number",
                     "visible": true,
                     "order": 14,
@@ -1013,7 +980,7 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "type": "integer",
+                    "type": "float",
                     "displayAs": "number",
                     "visible": true,
                     "order": 15,
@@ -1041,7 +1008,7 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "type": "integer",
+                    "type": "float",
                     "displayAs": "number",
                     "visible": true,
                     "order": 16,
@@ -1069,7 +1036,7 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "type": "integer",
+                    "type": "float",
                     "displayAs": "number",
                     "visible": true,
                     "order": 17,
@@ -1097,7 +1064,7 @@
                     "linkTextTemplate": "{{ @ }}",
                     "linkTitleTemplate": "{{ @ }}",
                     "linkOpenInNewTab": true,
-                    "type": "integer",
+                    "type": "float",
                     "displayAs": "number",
                     "visible": true,
                     "order": 18,
@@ -1624,10 +1591,37 @@
                   "linkTextTemplate": "{{ @ }}",
                   "linkTitleTemplate": "{{ @ }}",
                   "linkOpenInNewTab": true,
+                  "name": "QueryEfficiencyRatio",
+                  "type": "float",
+                  "displayAs": "number",
+                  "order": 4,
+                  "title": "Efficiency Ratio (Experimental)",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false,
+                  "description": "EXPERIMENTAL - Ratio of Execution Time to Total CPU Time (higher is worse)"
+                },
+                {
+                  "numberFormat": "0.00",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
                   "name": "SpillAmountZScore",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 7,
+                  "order": 6,
                   "title": "SpillAmountZScore",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1653,7 +1647,7 @@
                   "name": "DataVolumeZScore",
                   "type": "float",
                   "displayAs": "number",
-                  "order": 8,
+                  "order": 7,
                   "title": "DataVolumeZScore",
                   "allowSearch": false,
                   "alignContent": "right",
@@ -1678,7 +1672,7 @@
                   "name": "warehouse_id",
                   "type": "string",
                   "displayAs": "string",
-                  "order": 9,
+                  "order": 8,
                   "title": "warehouse_id",
                   "allowSearch": false,
                   "alignContent": "left",
@@ -2411,6 +2405,31 @@
                   "highlightLinks": false,
                   "useMonospaceFont": false,
                   "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "client_application",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 65,
+                  "title": "client_application",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
                 }
               ],
               "allowHTMLByDefault": false,
@@ -2428,7 +2447,7 @@
           },
           "position": {
             "x": 0,
-            "y": 99,
+            "y": 105,
             "width": 6,
             "height": 8
           }
@@ -2513,7 +2532,7 @@
           },
           "position": {
             "x": 0,
-            "y": 51,
+            "y": 43,
             "width": 4,
             "height": 6
           }
@@ -2560,7 +2579,7 @@
           },
           "position": {
             "x": 2,
-            "y": 70,
+            "y": 76,
             "width": 1,
             "height": 2
           }
@@ -2607,7 +2626,7 @@
           },
           "position": {
             "x": 3,
-            "y": 19,
+            "y": 22,
             "width": 3,
             "height": 2
           }
@@ -2678,7 +2697,7 @@
           },
           "position": {
             "x": 0,
-            "y": 27,
+            "y": 30,
             "width": 6,
             "height": 6
           }
@@ -2738,7 +2757,7 @@
           },
           "position": {
             "x": 0,
-            "y": 44,
+            "y": 62,
             "width": 2,
             "height": 7
           }
@@ -2810,13 +2829,15 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Caching Trends"
+                "title": "Caching Trends",
+                "showDescription": true,
+                "description": "Avg %Cache Used in Queries Over Time"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 63,
+            "y": 69,
             "width": 3,
             "height": 6
           }
@@ -2858,7 +2879,7 @@
           },
           "position": {
             "x": 5,
-            "y": 34,
+            "y": 38,
             "width": 1,
             "height": 2
           }
@@ -2905,7 +2926,7 @@
           },
           "position": {
             "x": 2,
-            "y": 34,
+            "y": 38,
             "width": 1,
             "height": 2
           }
@@ -2973,7 +2994,7 @@
           },
           "position": {
             "x": 4,
-            "y": 21,
+            "y": 24,
             "width": 2,
             "height": 6
           }
@@ -3015,7 +3036,7 @@
           },
           "position": {
             "x": 4,
-            "y": 70,
+            "y": 76,
             "width": 2,
             "height": 2
           }
@@ -3057,7 +3078,7 @@
           },
           "position": {
             "x": 3,
-            "y": 108,
+            "y": 115,
             "width": 1,
             "height": 2
           }
@@ -3099,7 +3120,7 @@
           },
           "position": {
             "x": 1,
-            "y": 108,
+            "y": 115,
             "width": 1,
             "height": 2
           }
@@ -3139,7 +3160,7 @@
           },
           "position": {
             "x": 3,
-            "y": 36,
+            "y": 40,
             "width": 1,
             "height": 2
           }
@@ -3185,8 +3206,8 @@
             }
           },
           "position": {
-            "x": 0,
-            "y": 6,
+            "x": 2,
+            "y": 4,
             "width": 2,
             "height": 2
           }
@@ -3226,7 +3247,7 @@
           },
           "position": {
             "x": 1,
-            "y": 19,
+            "y": 22,
             "width": 2,
             "height": 2
           }
@@ -3317,7 +3338,7 @@
           },
           "position": {
             "x": 0,
-            "y": 72,
+            "y": 78,
             "width": 3,
             "height": 6
           }
@@ -3364,7 +3385,7 @@
           },
           "position": {
             "x": 1,
-            "y": 34,
+            "y": 38,
             "width": 1,
             "height": 2
           }
@@ -3408,7 +3429,7 @@
           },
           "position": {
             "x": 4,
-            "y": 108,
+            "y": 115,
             "width": 2,
             "height": 2
           }
@@ -3496,7 +3517,7 @@
           },
           "position": {
             "x": 3,
-            "y": 78,
+            "y": 84,
             "width": 3,
             "height": 6
           }
@@ -3556,7 +3577,7 @@
           },
           "position": {
             "x": 2,
-            "y": 84,
+            "y": 90,
             "width": 2,
             "height": 7
           }
@@ -3642,7 +3663,7 @@
           },
           "position": {
             "x": 0,
-            "y": 118,
+            "y": 125,
             "width": 6,
             "height": 8
           }
@@ -3650,7 +3671,7 @@
         {
           "widget": {
             "name": "6024596d",
-            "textbox_spec": "## Section 1: Warehouse Billing Trends\n-----"
+            "textbox_spec": "## Section 1: Warehouse Billing Trends\n-----\nThis section helps users get a simple cost picture for their warehouse over time, as well as obtain a clear picture of momentum of cost over time - which can easily be turned into an alert. "
           },
           "position": {
             "x": 0,
@@ -3662,11 +3683,11 @@
         {
           "widget": {
             "name": "6521ef71",
-            "textbox_spec": "### Query Performance Detail"
+            "textbox_spec": "### Query Performance Detail\nThis section drills into details of identifying root causes of poorly performing warehouses down to the query bottlenecks such as spill, high data volume, and long running queries. "
           },
           "position": {
             "x": 0,
-            "y": 69,
+            "y": 75,
             "width": 6,
             "height": 1
           }
@@ -3708,7 +3729,7 @@
           },
           "position": {
             "x": 2,
-            "y": 108,
+            "y": 115,
             "width": 1,
             "height": 2
           }
@@ -3755,7 +3776,7 @@
           },
           "position": {
             "x": 1,
-            "y": 70,
+            "y": 76,
             "width": 1,
             "height": 2
           }
@@ -3802,7 +3823,7 @@
           },
           "position": {
             "x": 3,
-            "y": 34,
+            "y": 38,
             "width": 1,
             "height": 2
           }
@@ -3870,9 +3891,21 @@
           },
           "position": {
             "x": 0,
-            "y": 21,
+            "y": 24,
             "width": 4,
             "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "8780e1ba",
+            "textbox_spec": "#### Warehouse Performance - Query Queue Time\nQuery queue time helps show how long your queries are waiting in the queue to be run. This metric is largely controlled by the concurrency scaling. If your queue times are not meeting your required SLAs, consider increasing the max scaling clusters."
+          },
+          "position": {
+            "x": 0,
+            "y": 49,
+            "width": 6,
+            "height": 1
           }
         },
         {
@@ -3917,7 +3950,7 @@
           },
           "position": {
             "x": 0,
-            "y": 70,
+            "y": 76,
             "width": 1,
             "height": 2
           }
@@ -3927,13 +3960,13 @@
             "name": "8d8eb20b",
             "queries": [
               {
-                "name": "parameter_dashboards/01eee4980f461d848d978ef2b00c7f1a/datasets/01eeeacad13e14ae90b902c6c8537ea0_12h_percent_increase",
+                "name": "parameter_dashboards/01eee4980f461d848d978ef2b00c7f1a/datasets/01eeeacad13e14ae90b902c6c8537ea0_percent_increase",
                 "query": {
                   "datasetName": "883a8202",
                   "parameters": [
                     {
-                      "name": "12h_percent_increase",
-                      "keyword": "12h_percent_increase"
+                      "name": "percent_increase",
+                      "keyword": "percent_increase"
                     }
                   ],
                   "disaggregated": false
@@ -3946,8 +3979,8 @@
               "encodings": {
                 "fields": [
                   {
-                    "parameterName": "12h_percent_increase",
-                    "queryName": "parameter_dashboards/01eee4980f461d848d978ef2b00c7f1a/datasets/01eeeacad13e14ae90b902c6c8537ea0_12h_percent_increase"
+                    "parameterName": "percent_increase",
+                    "queryName": "parameter_dashboards/01eee4980f461d848d978ef2b00c7f1a/datasets/01eeeacad13e14ae90b902c6c8537ea0_percent_increase"
                   }
                 ]
               },
@@ -3958,10 +3991,10 @@
             }
           },
           "position": {
-            "x": 0,
-            "y": 8,
+            "x": 4,
+            "y": 4,
             "width": 1,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -4041,7 +4074,7 @@
           },
           "position": {
             "x": 0,
-            "y": 110,
+            "y": 117,
             "width": 6,
             "height": 8
           }
@@ -4083,7 +4116,7 @@
           },
           "position": {
             "x": 4,
-            "y": 34,
+            "y": 38,
             "width": 1,
             "height": 2
           }
@@ -4125,7 +4158,7 @@
           },
           "position": {
             "x": 0,
-            "y": 34,
+            "y": 38,
             "width": 1,
             "height": 2
           }
@@ -4145,13 +4178,13 @@
         {
           "widget": {
             "name": "9c728459",
-            "textbox_spec": "## Section 3: Query History Analysis\n-----"
+            "textbox_spec": "## Section 3: Query Performance Analysis\n-----\nThis section helps dive into warehouse performance to understand how well the warehouse is performing against SLAs, identifying bottlenecks, as well as queries that are taking up the majority of the resources."
           },
           "position": {
             "x": 0,
-            "y": 33,
+            "y": 36,
             "width": 6,
-            "height": 1
+            "height": 2
           }
         },
         {
@@ -4191,7 +4224,7 @@
           },
           "position": {
             "x": 0,
-            "y": 108,
+            "y": 115,
             "width": 1,
             "height": 2
           }
@@ -4238,7 +4271,7 @@
           },
           "position": {
             "x": 0,
-            "y": 36,
+            "y": 40,
             "width": 1,
             "height": 2
           }
@@ -4246,13 +4279,13 @@
         {
           "widget": {
             "name": "ad5e9d1d",
-            "textbox_spec": "## Section 4 - Query Resource Allocation Advisor\n-----"
+            "textbox_spec": "## Section 4 - Query Resource Allocation Advisor\n-----\nThis section helps to allocate query runtime cost across the warehouse down to the query level. The first visual is a pareto analysis that shows which queries take up the top X% of the warehouse total runtime. "
           },
           "position": {
             "x": 0,
-            "y": 107,
+            "y": 113,
             "width": 6,
-            "height": 1
+            "height": 2
           }
         },
         {
@@ -4835,7 +4868,7 @@
           },
           "position": {
             "x": 0,
-            "y": 126,
+            "y": 133,
             "width": 6,
             "height": 9
           }
@@ -4874,7 +4907,7 @@
               "version": 3,
               "widgetType": "bar",
               "encodings": {
-                "y": {
+                "x": {
                   "scale": {
                     "type": "quantitative",
                     "reverse": false
@@ -4912,9 +4945,9 @@
               "mark": {
                 "layout": "group",
                 "colors": [
+                  "#8BCAE7",
+                  "#2672cb",
                   "#00A972",
-                  "#077A9D",
-                  "#FFAB00",
                   "#FF3621",
                   "#8BCAE7",
                   "#AB4057",
@@ -4928,7 +4961,7 @@
           },
           "position": {
             "x": 4,
-            "y": 51,
+            "y": 43,
             "width": 2,
             "height": 6
           }
@@ -4936,13 +4969,13 @@
         {
           "widget": {
             "name": "b648d4c0",
-            "textbox_spec": "## Section 2: Warehouse Scaling Trends\n-----"
+            "textbox_spec": "## Section 2: Warehouse Scaling Trends\n-----\nThis sections simplifies trying to understand how well your warehouse scales as well as helps users project long term costs of spiky workloads more accurately. It pivots the real-time concurrency scaling chart and shows generally how much time and what % of time the warehouse was scaled up to each concurrency level. This can help guage scaling efficiency over time in production as well. "
           },
           "position": {
             "x": 0,
-            "y": 18,
+            "y": 20,
             "width": 6,
-            "height": 1
+            "height": 2
           }
         },
         {
@@ -4990,7 +5023,7 @@
           },
           "position": {
             "x": 2,
-            "y": 36,
+            "y": 40,
             "width": 1,
             "height": 2
           }
@@ -5066,7 +5099,7 @@
           },
           "position": {
             "x": 4,
-            "y": 44,
+            "y": 62,
             "width": 2,
             "height": 7
           }
@@ -5123,7 +5156,7 @@
           },
           "position": {
             "x": 0,
-            "y": 57,
+            "y": 50,
             "width": 4,
             "height": 6
           }
@@ -5192,7 +5225,7 @@
           },
           "position": {
             "x": 3,
-            "y": 38,
+            "y": 56,
             "width": 3,
             "height": 6
           }
@@ -5252,7 +5285,7 @@
           },
           "position": {
             "x": 4,
-            "y": 84,
+            "y": 90,
             "width": 2,
             "height": 7
           }
@@ -5267,8 +5300,8 @@
                   "datasetName": "883a8202",
                   "fields": [
                     {
-                      "name": "daily(usage_hour)",
-                      "expression": "DATE_TRUNC(\"DAY\", `usage_hour`)"
+                      "name": "hourly(usage_hour)",
+                      "expression": "DATE_TRUNC(\"HOUR\", `usage_hour`)"
                     },
                     {
                       "name": "sum(UsageDBUs)",
@@ -5288,7 +5321,7 @@
               "widgetType": "bar",
               "encodings": {
                 "x": {
-                  "fieldName": "daily(usage_hour)",
+                  "fieldName": "hourly(usage_hour)",
                   "scale": {
                     "type": "temporal"
                   },
@@ -5298,6 +5331,9 @@
                   "displayName": "Usage Hour"
                 },
                 "y": {
+                  "axis": {
+                    "title": "Usage Amount ($ or DBUs"
+                  },
                   "scale": {
                     "type": "quantitative"
                   },
@@ -5310,10 +5346,7 @@
                       "fieldName": "sum(UsageDBUs)",
                       "displayName": "Usage DBUs"
                     }
-                  ],
-                  "axis": {
-                    "title": "Usage Amount ($ or DBUs"
-                  }
+                  ]
                 },
                 "color": {
                   "legend": {
@@ -5332,7 +5365,6 @@
               "mark": {
                 "colors": [
                   "#2672cb",
-                  "#FFAB00",
                   "#00A972",
                   "#FF3621",
                   "#8BCAE7",
@@ -5347,9 +5379,9 @@
             }
           },
           "position": {
-            "x": 2,
-            "y": 4,
-            "width": 4,
+            "x": 0,
+            "y": 6,
+            "width": 6,
             "height": 7
           }
         },
@@ -5388,7 +5420,7 @@
           },
           "position": {
             "x": 5,
-            "y": 36,
+            "y": 40,
             "width": 1,
             "height": 2
           }
@@ -5483,7 +5515,7 @@
           },
           "position": {
             "x": 3,
-            "y": 72,
+            "y": 78,
             "width": 3,
             "height": 6
           }
@@ -5572,7 +5604,7 @@
           },
           "position": {
             "x": 2,
-            "y": 44,
+            "y": 62,
             "width": 2,
             "height": 7
           }
@@ -5614,7 +5646,7 @@
           },
           "position": {
             "x": 0,
-            "y": 19,
+            "y": 22,
             "width": 1,
             "height": 2
           }
@@ -5671,7 +5703,7 @@
           },
           "position": {
             "x": 2,
-            "y": 91,
+            "y": 97,
             "width": 2,
             "height": 8
           }
@@ -5728,7 +5760,7 @@
           },
           "position": {
             "x": 0,
-            "y": 91,
+            "y": 97,
             "width": 2,
             "height": 8
           }
@@ -5770,7 +5802,7 @@
           },
           "position": {
             "x": 3,
-            "y": 70,
+            "y": 76,
             "width": 1,
             "height": 2
           }
@@ -5838,7 +5870,7 @@
           },
           "position": {
             "x": 4,
-            "y": 91,
+            "y": 97,
             "width": 2,
             "height": 8
           }
@@ -5857,8 +5889,8 @@
                       "expression": "`HighIncreaseFlag`"
                     },
                     {
-                      "name": "sum(p12h_change_percentage)",
-                      "expression": "SUM(`p12h_change_percentage`)"
+                      "name": "sum(p24h_change_percentage)",
+                      "expression": "SUM(`p24h_change_percentage`)"
                     },
                     {
                       "name": "usage_hour",
@@ -5884,7 +5916,7 @@
                   "displayName": "Usage Hour"
                 },
                 "y": {
-                  "fieldName": "sum(p12h_change_percentage)",
+                  "fieldName": "sum(p24h_change_percentage)",
                   "scale": {
                     "type": "quantitative"
                   },
@@ -5905,6 +5937,14 @@
                       {
                         "value": 0,
                         "color": "#2672cb"
+                      },
+                      {
+                        "value": "High Momentum",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "Within Range",
+                        "color": "#2672cb"
                       }
                     ]
                   },
@@ -5919,13 +5959,13 @@
                 "showTitle": true,
                 "title": "Warehouse Momentum Alert Indicator",
                 "showDescription": true,
-                "description": "Popular Alerting Mechanism for identifying when warehouse usage (12 hour rolling) increase X%"
+                "description": "Popular Alerting Mechanism for identifying when warehouse usage (24 hour rolling) increase X%"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 11,
+            "y": 13,
             "width": 6,
             "height": 7
           }
@@ -5972,7 +6012,7 @@
           },
           "position": {
             "x": 1,
-            "y": 36,
+            "y": 40,
             "width": 1,
             "height": 2
           }
@@ -6011,7 +6051,7 @@
               "version": 3,
               "widgetType": "bar",
               "encodings": {
-                "y": {
+                "x": {
                   "scale": {
                     "type": "quantitative",
                     "reverse": false
@@ -6049,9 +6089,9 @@
               "mark": {
                 "layout": "group",
                 "colors": [
+                  "#8BCAE7",
+                  "#2672cb",
                   "#00A972",
-                  "#077A9D",
-                  "#FFAB00",
                   "#FF3621",
                   "#8BCAE7",
                   "#AB4057",
@@ -6065,7 +6105,7 @@
           },
           "position": {
             "x": 4,
-            "y": 57,
+            "y": 50,
             "width": 2,
             "height": 6
           }
@@ -6141,13 +6181,15 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Cost Per Query Over Time"
+                "title": "Cost Per Query Over Time",
+                "showDescription": true,
+                "description": "Query Avg Allocated Cost Over Time (By Execution Time)"
               }
             }
           },
           "position": {
             "x": 3,
-            "y": 63,
+            "y": 69,
             "width": 3,
             "height": 6
           }
@@ -6204,7 +6246,7 @@
           },
           "position": {
             "x": 0,
-            "y": 84,
+            "y": 90,
             "width": 2,
             "height": 7
           }
@@ -6273,9 +6315,21 @@
           },
           "position": {
             "x": 0,
-            "y": 38,
+            "y": 56,
             "width": 3,
             "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "fc356cc4",
+            "textbox_spec": "#### Warehouse Performance - Query Runtime\nQuery runtime helps identify if your warehouse is meeting your SLAs. The runtime is generally controlled by the size of the warehouse. So if your queries are running slower than your desired SLA, try increasing the warehouse T-shirt size. "
+          },
+          "position": {
+            "x": 0,
+            "y": 42,
+            "width": 6,
+            "height": 1
           }
         },
         {
@@ -6287,6 +6341,10 @@
                 "query": {
                   "datasetName": "883a8202",
                   "fields": [
+                    {
+                      "name": "sum(UsageDBUs)",
+                      "expression": "SUM(`UsageDBUs`)"
+                    },
                     {
                       "name": "sum(UsageDollars)",
                       "expression": "SUM(`UsageDollars`)"
@@ -6303,19 +6361,25 @@
                 "value": {
                   "fieldName": "sum(UsageDollars)",
                   "displayName": "Sum of UsageDollars"
+                },
+                "target": {
+                  "fieldName": "sum(UsageDBUs)",
+                  "displayName": "Sum of UsageDBUs"
                 }
               },
               "frame": {
                 "showTitle": true,
-                "title": "$ Spend In Period"
+                "title": "$ Spend In Period",
+                "showDescription": true,
+                "description": "(DBUs)"
               }
             }
           },
           "position": {
-            "x": 1,
-            "y": 8,
+            "x": 5,
+            "y": 4,
             "width": 1,
-            "height": 3
+            "height": 2
           }
         },
         {
