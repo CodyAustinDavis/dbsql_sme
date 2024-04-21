@@ -1,0 +1,1146 @@
+{
+  "datasets": [
+    {
+      "name": "0da56ea7",
+      "displayName": "Audit Patterns",
+      "query": "SELECT *,\n user_identity.email AS user_id,\n CASE WHEN response.status_code = 200 OR response.error_message IS NULL THEN 'Success' ELSE 'Failed' END AS action_status\nFROM system.access.audit\nWHERE user_identity.email = :entity",
+      "parameters": [
+        {
+          "displayName": "entity",
+          "keyword": "entity",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "first.last@databricks.com"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ce3705a7",
+      "displayName": "Data Asset Privleges",
+      "query": "WITH all_privs AS (\n-- Tables    \nSELECT grantor, grantee, \n    CONCAT(table_catalog, '.', table_schema, '.', table_name) AS entity_name, \n    'table' AS entity_type, \n    privilege_type, is_grantable, inherited_from, \nCASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege \nFROM system.information_schema.table_privileges\nWHERE lower(grantee) = lower(:entity)\n\n UNION ALL \n\n-- Schema \nSELECT grantor, grantee, \n    CONCAT(catalog_name, '.', schema_name) AS entity_name, \n    'schema' AS entity_type, \n    privilege_type, is_grantable, inherited_from, \nCASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege \nFROM system.information_schema.schema_privileges\nWHERE lower(grantee) = :entity\n\nUNION ALL\n\n-- Catalog \nSELECT grantor, grantee, \n    CONCAT(catalog_name) AS entity_name, \n    'catalog' AS entity_type, \n    privilege_type, is_grantable, inherited_from, \nCASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege \nFROM system.information_schema.schema_privileges\nWHERE lower(grantee) = lower(:entity)\n\nUNION ALL\n\n-- Volumes \nSELECT grantor, grantee, \n    CONCAT(volume_catalog, '.', volume_schema, '.', volume_name) AS entity_name, \n    'volume' AS entity_type, \n    privilege_type, is_grantable, inherited_from, \nCASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege \nFROM system.information_schema.volume_privileges\nWHERE lower(grantee) = lower(:entity)\n\nUNION ALL\n\n-- Storage Credentials \nSELECT grantor, grantee, \n    CONCAT(storage_credential_name) AS entity_name, \n    'storage credential' AS entity_type, \n    privilege_type, is_grantable, inherited_from, \nCASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege \nFROM system.information_schema.storage_credential_privileges\nWHERE lower(grantee) = lower(:entity)\n\nUNION ALL\n\n-- External Locations \nSELECT grantor, grantee, \n    CONCAT(external_location_name) AS entity_name, \n    'external location' AS entity_type, \n    privilege_type, is_grantable, inherited_from, \nCASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege \nFROM system.information_schema.external_location_privileges\nWHERE lower(grantee) = lower(:entity)\n\nUNION ALL\n\n-- Metastores\nSELECT grantor, grantee, \n    CONCAT(metastore_id) AS entity_name, \n    'metastore' AS entity_type, \n    privilege_type, is_grantable, inherited_from, \nCASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege \nFROM system.information_schema.metastore_privileges\nWHERE lower(grantee) = lower(:entity)\n\n)\n\nSELECt * \nFROM all_privs\n\n\n",
+      "parameters": [
+        {
+          "displayName": "entity",
+          "keyword": "entity",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "first.last@databricks.com"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "1e09eacf",
+      "displayName": "New Page",
+      "layout": [
+        {
+          "widget": {
+            "name": "02f64008",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "service_name",
+                      "expression": "`service_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Events"
+                },
+                "y": {
+                  "fieldName": "service_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "service_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Audit Events By Service"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 29,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "06e11495",
+            "queries": [
+              {
+                "name": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_service_name",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "service_name",
+                      "expression": "`service_name`"
+                    },
+                    {
+                      "name": "service_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "service_name",
+                    "displayName": "service_name",
+                    "queryName": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_service_name"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Service"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 20,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "07a0673d",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_entity",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "parameters": [
+                    {
+                      "name": "entity",
+                      "keyword": "entity"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "entity",
+                    "queryName": "parameter_dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_entity"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Data Access Entity"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "0826818a",
+            "queries": [
+              {
+                "name": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_user_agent",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "user_agent",
+                      "expression": "`user_agent`"
+                    },
+                    {
+                      "name": "user_agent_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "user_agent",
+                    "displayName": "user_agent",
+                    "queryName": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_user_agent"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "User Agent"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 20,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "18c3900a",
+            "queries": [
+              {
+                "name": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_privilege_type",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "fields": [
+                    {
+                      "name": "privilege_type",
+                      "expression": "`privilege_type`"
+                    },
+                    {
+                      "name": "privilege_type_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "privilege_type",
+                    "displayName": "privilege_type",
+                    "queryName": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_privilege_type"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Privilege Type"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 3,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "355b408d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "fields": [
+                    {
+                      "name": "countdistinct(entity_name)",
+                      "expression": "COUNT(DISTINCT `entity_name`)"
+                    },
+                    {
+                      "name": "inherited_from",
+                      "expression": "`inherited_from`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "inherited_from",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "inherited_from"
+                },
+                "y": {
+                  "fieldName": "countdistinct(entity_name)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Distinct Entities"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Access By Inheritance Source"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 13,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "39244ca7",
+            "queries": [
+              {
+                "name": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_entity_type",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "fields": [
+                    {
+                      "name": "entity_type",
+                      "expression": "`entity_type`"
+                    },
+                    {
+                      "name": "entity_type_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "entity_type",
+                    "displayName": "entity_type",
+                    "queryName": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_entity_type"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Entity Type"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "44f18f10",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "entity_name",
+                      "expression": "`entity_name`"
+                    },
+                    {
+                      "name": "entity_type",
+                      "expression": "`entity_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "heatmap",
+              "encodings": {
+                "x": {
+                  "fieldName": "entity_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "entity_type"
+                },
+                "y": {
+                  "fieldName": "entity_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "entity_name"
+                },
+                "color": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "scheme",
+                      "scheme": "greenblue"
+                    }
+                  },
+                  "displayName": "Count of Records"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Access by Entity and Method"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 3,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "48abd060",
+            "queries": [
+              {
+                "name": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_audit_level",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "audit_level",
+                      "expression": "`audit_level`"
+                    },
+                    {
+                      "name": "audit_level_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "audit_level",
+                    "displayName": "audit_level",
+                    "queryName": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_audit_level"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Audit Level"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "4a377b14",
+            "textbox_spec": "### Data Asset Access \n-----"
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "50fc422e",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "service_name",
+                      "expression": "`service_name`"
+                    },
+                    {
+                      "name": "weekly(event_time)",
+                      "expression": "DATE_TRUNC(\"WEEK\", `event_time`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "weekly(event_time)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_time"
+                },
+                "y": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Count of Records"
+                },
+                "color": {
+                  "fieldName": "service_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "service_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Events By Service Over Time"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 35,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "6163c554",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_entity",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "parameters": [
+                    {
+                      "name": "entity",
+                      "keyword": "entity"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "entity",
+                    "queryName": "parameter_dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_entity"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Audit Access Entity"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "6a555854",
+            "queries": [
+              {
+                "name": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_action_name",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "action_name",
+                      "expression": "`action_name`"
+                    },
+                    {
+                      "name": "action_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "action_name",
+                    "displayName": "action_name",
+                    "queryName": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_action_name"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Action"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 20,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "74c4fc63",
+            "textbox_spec": "### Audit History \n-----"
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "856bc63f",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "action_status",
+                      "expression": "`action_status`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "weekly(event_time)",
+                      "expression": "DATE_TRUNC(\"WEEK\", `event_time`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "weekly(event_time)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_time"
+                },
+                "y": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Audit Events"
+                },
+                "color": {
+                  "fieldName": "action_status",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Failed",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "Success",
+                        "color": "#00A972"
+                      }
+                    ]
+                  },
+                  "displayName": "action_status"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Events By Status"
+              },
+              "mark": {
+                "layout": "stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 22,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "96758a5e",
+            "queries": [
+              {
+                "name": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_daily(event_time)",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "daily(event_time)",
+                      "expression": "DATE_TRUNC(\"DAY\", `event_time`)"
+                    },
+                    {
+                      "name": "daily(event_time)_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "daily(event_time)",
+                    "displayName": "event_time",
+                    "queryName": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef0026ddb517b3b63da3ef67c2dadd_daily(event_time)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Audit Access Date Range"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "df08cf68",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "fields": [
+                    {
+                      "name": "IsDirectPrivilege",
+                      "expression": "`IsDirectPrivilege`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "entity_type",
+                      "expression": "`entity_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "entity_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "entity_type"
+                },
+                "y": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Entitled Entities"
+                  },
+                  "displayName": "Entitled Entities"
+                },
+                "color": {
+                  "fieldName": "IsDirectPrivilege",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "legend": {
+                    "position": "bottom"
+                  },
+                  "displayName": "IsDirectPrivilege"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Access by Entity and Method"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "f0525709",
+            "queries": [
+              {
+                "name": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_inherited_from",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "fields": [
+                    {
+                      "name": "inherited_from",
+                      "expression": "`inherited_from`"
+                    },
+                    {
+                      "name": "inherited_from_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "inherited_from",
+                    "displayName": "inherited_from",
+                    "queryName": "dashboards/01ef0023f69a1fb2988fe13b4276bc72/datasets/01ef002425481a40a220cd0e48b0d2cd_inherited_from"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Inherited Source"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "fbc4bfa8",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "action_name",
+                      "expression": "`action_name`"
+                    },
+                    {
+                      "name": "action_status",
+                      "expression": "`action_status`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "service_name",
+                      "expression": "`service_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "action_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "action_name"
+                },
+                "y": {
+                  "fieldName": "service_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "service_name"
+                },
+                "color": {
+                  "fieldName": "action_status",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Failed",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "Success",
+                        "color": "#00A972"
+                      }
+                    ]
+                  },
+                  "displayName": "action_status"
+                },
+                "size": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Count of Records"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Anomaly Scatter"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 42,
+            "width": 6,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "fe353650",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ce3705a7",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "entity_name",
+                      "expression": "`entity_name`"
+                    },
+                    {
+                      "name": "privilege_type",
+                      "expression": "`privilege_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "heatmap",
+              "encodings": {
+                "x": {
+                  "fieldName": "privilege_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "privilege_type"
+                },
+                "y": {
+                  "fieldName": "entity_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "entity_name"
+                },
+                "color": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "scheme",
+                      "scheme": "greenblue"
+                    }
+                  },
+                  "displayName": "Records That Show Access"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Access by Privilege Type"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 5,
+            "width": 3,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "fed81756",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "0da56ea7",
+                  "fields": [
+                    {
+                      "name": "action_name",
+                      "expression": "`action_name`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Events"
+                },
+                "y": {
+                  "fieldName": "action_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "action_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Audit Events By Action"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 29,
+            "width": 3,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ]
+}
