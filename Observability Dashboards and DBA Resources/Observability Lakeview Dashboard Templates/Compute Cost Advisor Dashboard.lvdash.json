@@ -1,0 +1,1373 @@
+{
+  "datasets": [
+    {
+      "name": "19088371",
+      "displayName": "Billing Timeline",
+      "query": "WITH compute AS (\nSELECT\n  c.cluster_name,\n  CASE\n    WHEN c.cluster_name LIKE 'job-%' THEN 'Job Cluster'\n    WHEN c.cluster_name LIKE 'dlt-%' THEN 'DLT Pipeline'\n    ELSE 'Adhoc Cluster'\n  END AS cluster_type,\n  CASE\n    WHEN c.cluster_name LIKE 'job-%' THEN regexp_extract(c.cluster_name, '^job-(\\\\d+)-')\n    WHEN c.cluster_name LIKE 'dlt-%' THEN regexp_extract(c.cluster_name, '^dlt-(\\\\d+)-')\n    ELSE NULL\n  END AS job_or_pipeline_id,\n  c.*\nFROM system.compute.clusters c\n),\n \npx_all AS (\n  SELECT DISTINCT\n  sku_name,\n  pricing.default AS unit_price,\n  CASE \n  WHEN sku_name LIKE ('%ALL_PURPOSE%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%DLT%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%JOBS%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%SQL%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  ELSE unit_price::float\n  END AS sku_price\n  FROM system.billing.list_prices \n  QUALIFY ROW_NUMBER() OVER (PARTITION BY sku_name ORDER BY price_start_time DESC) = 1\n\n  ),\n\nparsed_tagging_table AS (\n    WITH split_data AS (\n      SELECT \n        split(regexp_replace(:tagging_raw_architecture, '\\\\s+', ''), ';') AS kv_pairs\n    ),\n    exploded_data AS (\n      SELECT \n        monotonically_increasing_id() AS order_id,\n        explode(kv_pairs) AS kv_pair\n      FROM \n        split_data\n    ),\n    clean_keys AS (\n\n      SELECT \n        split(kv_pair, '=')[0] AS key,\n        COALESCE(split(kv_pair, '=')[1], '') AS value\n      FROM \n        exploded_data\n    ),\n\n    aggregated_data AS (\n      SELECT \n        collect_list(key) as keys,\n        collect_list(value) as values\n      FROM \n        clean_keys\n    )\n    SELECT \n      map_from_arrays(keys, values) AS result_map\n    FROM \n      aggregated_data LIMIT 1\n)\n\nSELECT \nu.*,\nc.*,\n-- Calcualte LIST Prices (unless discounts are baked in above in px_all table)\nsku_price*usage_quantity AS Dollar_DBUs,\n-- Clean up cluster / warehouse ids from all places\nCOALESCE(c.cluster_id, u.usage_metadata.cluster_id, usage_metadata.warehouse_id) AS clean_cluster_id,\nCOALESCE(c.job_or_pipeline_id, u.usage_metadata.job_id, u.usage_metadata.dlt_pipeline_id, 'Adhoc Or Serving') AS clean_job_or_pipeline_id,\n\n-- Categorize SKUs for easier cleaner reporting\nCASE WHEN u.sku_name LIKE ('%PURPOSE%') THEN 'All Purpose'\n     WHEN u.sku_name LIKE ('%DLT%') THEN 'Delta Live Tables'\n     WHEN u.sku_name LIKE ('%JOBS%') THEN 'Jobs'\n     WHEN u.sku_name LIKE ('%SQL%') THEN 'DBSQL'\n     WHEN u.sku_name LIKE ('%INFERENCE%') THEN 'Model Serving'\n     ELSE 'Unknown' END AS SkuCategory,\nCASE WHEN u.sku_name LIKE ('%SERVERLESS%') OR u.product_features.is_serverless = 'true' THEN 'Serverless' ELSE 'Hosted' END AS IsServerless,\n-- Tagging Policy Identification and Enforcement\n\n-- Get Total Keys Required\n(SELECT MAX(size(map_keys(result_map))) FROM parsed_tagging_table) AS TotalPolicyTags,\narray_intersect(map_keys(u.custom_tags), (SELECT MAX(map_keys(result_map)) FROM parsed_tagging_table)) AS CompliantTagKeys,\narray_except((SELECT MAX(map_keys(result_map)) FROM parsed_tagging_table), map_keys(u.custom_tags)) AS MissingTagKeys,\nsize(CompliantTagKeys) AS NumberOfCompliantKeys,\narray_join(CompliantTagKeys, '_') AS TagPolicyKeys,\narray_join(transform(CompliantTagKeys, key -> u.custom_tags[key]), '_') AS CompliantValues,\nCASE WHEN NumberOfCompliantKeys >= TotalPolicyTags THEN 'Compliant' ELSE 'Not Compliant To Tag Policy' END AS IsTaggingCompliant\nFROM system.billing.usage AS u\nINNER JOIN px_all AS px ON px.sku_name = u.sku_name\nLEFT JOIN compute AS c\n    ON (c.cluster_id = u.usage_metadata.cluster_id\n        AND (   (c.job_or_pipeline_id = u.usage_metadata.job_id)\n                OR (c.job_or_pipeline_id = u.usage_metadata.dlt_pipeline_id)\n                OR (c.job_or_pipeline_id = 'Adhoc')\n            )\n    )\n",
+      "parameters": [
+        {
+          "displayName": "tagging_raw_architecture",
+          "keyword": "tagging_raw_architecture",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "env;system"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "f14f0acb",
+      "displayName": "New Page",
+      "layout": [
+        {
+          "widget": {
+            "name": "0c9b87fb",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "IsServerless",
+                      "expression": "`IsServerless`"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "y": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Total Usage ($ DBUs)"
+                  },
+                  "displayName": "Total Usage ($ DBUs)"
+                },
+                "color": {
+                  "fieldName": "IsServerless",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Serverless",
+                        "color": "#00A972"
+                      }
+                    ]
+                  },
+                  "legend": {
+                    "position": "bottom",
+                    "title": "Is Serverless"
+                  },
+                  "displayName": "Is Serverless"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Serverless %"
+              },
+              "mark": {
+                "layout": "percent-stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 1,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "0d11b576",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_SkuCategory",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "SkuCategory",
+                      "expression": "`SkuCategory`"
+                    },
+                    {
+                      "name": "SkuCategory_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "SkuCategory",
+                    "displayName": "SkuCategory",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_SkuCategory"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Category"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "10462446",
+            "textbox_spec": "## Compute Tagging Manager\n-----\nThis section helps define a tagging policy system, group analysis by that tagging framework, and audit non-compliance to a given tagging architecture for enterprise observability"
+          },
+          "position": {
+            "x": 0,
+            "y": 37,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "19704c98",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "clean_cluster_id",
+                      "expression": "`clean_cluster_id`"
+                    },
+                    {
+                      "name": "cluster_type",
+                      "expression": "`cluster_type`"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Usage ($ DBUs)"
+                },
+                "y": {
+                  "fieldName": "clean_cluster_id",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Cluster / Warehouse Id"
+                },
+                "color": {
+                  "fieldName": "cluster_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Cluster Type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage By Cluster Id"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 20,
+            "width": 3,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "1bcf85c3",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_IsTaggingCompliant",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "IsTaggingCompliant",
+                      "expression": "`IsTaggingCompliant`"
+                    },
+                    {
+                      "name": "IsTaggingCompliant_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "IsTaggingCompliant",
+                    "displayName": "IsTaggingCompliant",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_IsTaggingCompliant"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Is Compliant to Tag Policy?"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 39,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "218121d7",
+            "textbox_spec": "# Cluster Advisor Dashboard\n\n#### Section 1 - Billing Advisor - See where your costs are going\n#### Section 2 - Tagging Manager - Implement, Audit, and Enforce Tagging Policies across all compute\n\n-----\n### TO DO: \n\n1. Add $DBUs and cluster pricing - list rates for now\n2. Add tagging capabilities - WAL in App\n3. Add T7, 30, 90, 365 Rolling Spend Metrics - top level but dynamic"
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "26742fb1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    },
+                    {
+                      "name": "sum(usage_quantity)",
+                      "expression": "SUM(`usage_quantity`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "displayName": "Sum of Dollar_DBUs"
+                },
+                "target": {
+                  "fieldName": "sum(usage_quantity)",
+                  "displayName": "Sum of usage_quantity"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Usage In Period - $DBUs",
+                "showDescription": true,
+                "description": "(DBUs)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 4,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "395e081e",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "sku_name",
+                      "expression": "`sku_name`"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    },
+                    {
+                      "name": "worker_node_type",
+                      "expression": "`worker_node_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "worker_node_type",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "worker_node_type"
+                },
+                "y": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Usage ($ DBUs)"
+                  },
+                  "displayName": "Usage (DBUs)"
+                },
+                "color": {
+                  "fieldName": "sku_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "sku_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage By Instance Type"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 29,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "3c25822c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "IsTaggingCompliant",
+                      "expression": "`IsTaggingCompliant`"
+                    },
+                    {
+                      "name": "countdistinct(clean_cluster_id)",
+                      "expression": "COUNT(DISTINCT `clean_cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "y": {
+                  "fieldName": "countdistinct(clean_cluster_id)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Cluster Ids"
+                },
+                "color": {
+                  "fieldName": "IsTaggingCompliant",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Not Compliant To Tag Policy",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "Compliant",
+                        "color": "#00A972"
+                      }
+                    ]
+                  },
+                  "displayName": "IsTaggingCompliant"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clusters By Compliance"
+              },
+              "mark": {
+                "layout": "percent-stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 45,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "4a28ab3d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "owned_by",
+                      "expression": "`owned_by`"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Usage ($ DBUs)"
+                  },
+                  "displayName": "Usage (DBUs)"
+                },
+                "y": {
+                  "fieldName": "owned_by",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Cluster Owner"
+                },
+                "color": {
+                  "fieldName": "owned_by",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "owned_by"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage By Cluster Owner"
+              },
+              "mark": {
+                "layout": "stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 3,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "81ed6f48",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_tagging_raw_architecture",
+                "query": {
+                  "datasetName": "19088371",
+                  "parameters": [
+                    {
+                      "name": "tagging_raw_architecture",
+                      "keyword": "tagging_raw_architecture"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "tagging_raw_architecture",
+                    "queryName": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_tagging_raw_architecture"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Dynamic Tagging Policy",
+                "showDescription": true,
+                "description": "Define a tagging architecture here in the format of \nkey1=value1;key2=value2 (values are optional). If values are povided, this also enforces the provided values. \n\nFrom this, the visuals in this section will identify which clusters/jobs enforce this policy so you can see usage by this tagging architecture as well as identify improperly tagged clusters/jobs. "
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 41,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "8f8f6035",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_MissingTagKeys",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "MissingTagKeys",
+                      "expression": "`MissingTagKeys`"
+                    },
+                    {
+                      "name": "MissingTagKeys_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "MissingTagKeys",
+                    "displayName": "MissingTagKeys",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_MissingTagKeys"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Missing Tag Keys"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 39,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "906d666f",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "IsTaggingCompliant",
+                      "expression": "`IsTaggingCompliant`"
+                    },
+                    {
+                      "name": "clean_cluster_id",
+                      "expression": "`clean_cluster_id`"
+                    },
+                    {
+                      "name": "clean_job_or_pipeline_id",
+                      "expression": "`clean_job_or_pipeline_id`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    },
+                    {
+                      "name": "identity_metadata",
+                      "expression": "`identity_metadata`"
+                    },
+                    {
+                      "name": "owned_by",
+                      "expression": "`owned_by`"
+                    },
+                    {
+                      "name": "sku_name",
+                      "expression": "`sku_name`"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`clean_cluster_id`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`clean_job_or_pipeline_id`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`owned_by`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`identity_metadata`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`IsTaggingCompliant`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`sku_name`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "clean_cluster_id",
+                    "displayName": "clean_cluster_id"
+                  },
+                  {
+                    "fieldName": "clean_job_or_pipeline_id",
+                    "displayName": "clean_job_or_pipeline_id"
+                  },
+                  {
+                    "fieldName": "owned_by",
+                    "displayName": "owned_by"
+                  },
+                  {
+                    "fieldName": "identity_metadata",
+                    "displayName": "identity_metadata"
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "IsTaggingCompliant",
+                    "displayName": "IsTaggingCompliant"
+                  },
+                  {
+                    "fieldName": "sku_name",
+                    "displayName": "sku_name"
+                  }
+                ],
+                "cell": {
+                  "fieldName": "count(*)",
+                  "cellType": "text",
+                  "displayName": "Count of Records"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clusters & Jobs/DLT pipelines By Compliance"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 51,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "9625f27c",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_clean_job_or_pipeline_id",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "clean_job_or_pipeline_id",
+                      "expression": "`clean_job_or_pipeline_id`"
+                    },
+                    {
+                      "name": "clean_job_or_pipeline_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "clean_job_or_pipeline_id",
+                    "displayName": "clean_job_or_pipeline_id",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_clean_job_or_pipeline_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Job / Pipeline Id"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 4,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "aad88aa5",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_owned_by",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "owned_by",
+                      "expression": "`owned_by`"
+                    },
+                    {
+                      "name": "owned_by_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "owned_by",
+                    "displayName": "owned_by",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_owned_by"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Owned By"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "b4e345a2",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_sku_name",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "sku_name",
+                      "expression": "`sku_name`"
+                    },
+                    {
+                      "name": "sku_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "sku_name",
+                    "displayName": "sku_name",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_sku_name"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "SKU"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "b61dbfe7",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "CompliantValues",
+                      "expression": "`CompliantValues`"
+                    },
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(usage_date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Usage ($ DBUs)"
+                  },
+                  "displayName": "Usage (DBUs)"
+                },
+                "color": {
+                  "fieldName": "CompliantValues",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "",
+                        "color": "#919191"
+                      },
+                      {
+                        "value": "demo_project",
+                        "color": "#1461df"
+                      }
+                    ]
+                  },
+                  "displayName": "Tag Keys"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage By Tag Values"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 45,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c791d59c",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_IsServerless",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "IsServerless",
+                      "expression": "`IsServerless`"
+                    },
+                    {
+                      "name": "IsServerless_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "IsServerless",
+                    "displayName": "IsServerless",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_IsServerless"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Serverless?"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "cc0309f6",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_clean_cluster_id",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "clean_cluster_id",
+                      "expression": "`clean_cluster_id`"
+                    },
+                    {
+                      "name": "clean_cluster_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "clean_cluster_id",
+                    "displayName": "clean_cluster_id",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_clean_cluster_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cluster / Warehouse Id"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "d54b1298",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_daily(usage_date)",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "daily(usage_date)_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "daily(usage_date)",
+                    "displayName": "usage_date",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_daily(usage_date)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage Date"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f05e037a",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "sku_name",
+                      "expression": "`sku_name`"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(usage_date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Usage ($ DBUs)"
+                },
+                "color": {
+                  "fieldName": "sku_name",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Delta Live Tables",
+                        "color": "#0567c6"
+                      }
+                    ]
+                  },
+                  "legend": {
+                    "position": "bottom"
+                  },
+                  "displayName": "SKU"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Spend By SKU"
+              },
+              "mark": {
+                "layout": "stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "f944c0ab",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "IsTaggingCompliant",
+                      "expression": "`IsTaggingCompliant`"
+                    },
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(usage_date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Usage ($ DBUs)"
+                  },
+                  "displayName": "Usage (DBUs)"
+                },
+                "color": {
+                  "fieldName": "IsTaggingCompliant",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Not Compliant To Tag Policy",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "Compliant",
+                        "color": "#00A972"
+                      }
+                    ]
+                  },
+                  "legend": {
+                    "title": "Tag Policy Compliance",
+                    "position": "bottom"
+                  },
+                  "displayName": "Tag Policy Compliance"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage By Compliance"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 39,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "fbe937f2",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "SkuCategory",
+                      "expression": "`SkuCategory`"
+                    },
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(usage_date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Usage ( $ DBUs)"
+                  },
+                  "displayName": "$ DBUs"
+                },
+                "color": {
+                  "fieldName": "SkuCategory",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Delta Live Tables",
+                        "color": "#7805c6"
+                      },
+                      {
+                        "value": "All Purpose",
+                        "color": "#00A972"
+                      },
+                      {
+                        "value": "Model Serving",
+                        "color": "#2c62eb"
+                      },
+                      {
+                        "value": "Jobs",
+                        "color": "#077A9D"
+                      }
+                    ]
+                  },
+                  "legend": {
+                    "title": "Category",
+                    "position": "bottom"
+                  },
+                  "displayName": "Category"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Spend By Category"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 6,
+            "width": 5,
+            "height": 7
+          }
+        }
+      ]
+    }
+  ]
+}
