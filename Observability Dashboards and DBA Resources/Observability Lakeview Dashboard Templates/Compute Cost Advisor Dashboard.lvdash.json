@@ -3,7 +3,7 @@
     {
       "name": "19088371",
       "displayName": "Billing Timeline",
-      "query": "WITH compute AS (\nSELECT\n  c.cluster_name,\n  CASE\n    WHEN c.cluster_name LIKE 'job-%' THEN 'Job Cluster'\n    WHEN c.cluster_name LIKE 'dlt-%' THEN 'DLT Pipeline'\n    ELSE 'Adhoc Cluster'\n  END AS cluster_type,\n  CASE\n    WHEN c.cluster_name LIKE 'job-%' THEN regexp_extract(c.cluster_name, '^job-(\\\\d+)-')\n    WHEN c.cluster_name LIKE 'dlt-%' THEN regexp_extract(c.cluster_name, '^dlt-(\\\\d+)-')\n    ELSE NULL\n  END AS job_or_pipeline_id,\n  c.*\nFROM system.compute.clusters c\n),\n \npx_all AS (\n  SELECT DISTINCT\n  sku_name,\n  pricing.default AS unit_price,\n  CASE \n  WHEN sku_name LIKE ('%ALL_PURPOSE%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%DLT%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%JOBS%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%SQL%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  ELSE unit_price::float\n  END AS sku_price\n  FROM system.billing.list_prices \n  QUALIFY ROW_NUMBER() OVER (PARTITION BY sku_name ORDER BY price_start_time DESC) = 1\n\n  ),\n\nparsed_tagging_table AS (\n    WITH split_data AS (\n      SELECT \n        split(regexp_replace(:tagging_raw_architecture, '\\\\s+', ''), ';') AS kv_pairs\n    ),\n    exploded_data AS (\n      SELECT \n        monotonically_increasing_id() AS order_id,\n        explode(kv_pairs) AS kv_pair\n      FROM \n        split_data\n    ),\n    clean_keys AS (\n\n      SELECT \n        split(kv_pair, '=')[0] AS key,\n        COALESCE(split(kv_pair, '=')[1], '') AS value\n      FROM \n        exploded_data\n    ),\n\n    aggregated_data AS (\n      SELECT \n        collect_list(key) as keys,\n        collect_list(value) as values\n      FROM \n        clean_keys\n    )\n    SELECT \n      map_from_arrays(keys, values) AS result_map\n    FROM \n      aggregated_data LIMIT 1\n)\n\nSELECT \nu.*,\nc.*,\n-- Calcualte LIST Prices (unless discounts are baked in above in px_all table)\nsku_price*usage_quantity AS Dollar_DBUs,\n-- Clean up cluster / warehouse ids from all places\nCOALESCE(c.cluster_id, u.usage_metadata.cluster_id, usage_metadata.warehouse_id) AS clean_cluster_id,\nCOALESCE(c.job_or_pipeline_id, u.usage_metadata.job_id, u.usage_metadata.dlt_pipeline_id, 'Adhoc Or Serving') AS clean_job_or_pipeline_id,\n\n-- Categorize SKUs for easier cleaner reporting\nCASE WHEN u.sku_name LIKE ('%PURPOSE%') THEN 'All Purpose'\n     WHEN u.sku_name LIKE ('%DLT%') THEN 'Delta Live Tables'\n     WHEN u.sku_name LIKE ('%JOBS%') THEN 'Jobs'\n     WHEN u.sku_name LIKE ('%SQL%') THEN 'DBSQL'\n     WHEN u.sku_name LIKE ('%INFERENCE%') THEN 'Model Serving'\n     ELSE 'Unknown' END AS SkuCategory,\nCASE WHEN u.sku_name LIKE ('%SERVERLESS%') OR u.product_features.is_serverless = 'true' THEN 'Serverless' ELSE 'Hosted' END AS IsServerless,\n-- Tagging Policy Identification and Enforcement\n\n-- Get Total Keys Required\n(SELECT MAX(size(map_keys(result_map))) FROM parsed_tagging_table) AS TotalPolicyTags,\narray_intersect(map_keys(u.custom_tags), (SELECT MAX(map_keys(result_map)) FROM parsed_tagging_table)) AS CompliantTagKeys,\narray_except((SELECT MAX(map_keys(result_map)) FROM parsed_tagging_table), map_keys(u.custom_tags)) AS MissingTagKeys,\nsize(CompliantTagKeys) AS NumberOfCompliantKeys,\narray_join(CompliantTagKeys, '_') AS TagPolicyKeys,\narray_join(transform(CompliantTagKeys, key -> u.custom_tags[key]), '_') AS CompliantValues,\nCASE WHEN NumberOfCompliantKeys >= TotalPolicyTags THEN 'Compliant' ELSE 'Not Compliant To Tag Policy' END AS IsTaggingCompliant\nFROM system.billing.usage AS u\nINNER JOIN px_all AS px ON px.sku_name = u.sku_name\nLEFT JOIN compute AS c\n    ON (c.cluster_id = u.usage_metadata.cluster_id\n        AND (   (c.job_or_pipeline_id = u.usage_metadata.job_id)\n                OR (c.job_or_pipeline_id = u.usage_metadata.dlt_pipeline_id)\n                OR (c.job_or_pipeline_id = 'Adhoc')\n            )\n    )\n",
+      "query": "WITH compute AS (\nSELECT\n  c.cluster_name,\n  CASE\n    WHEN c.cluster_name LIKE 'job-%' THEN 'Job Cluster'\n    WHEN c.cluster_name LIKE 'dlt-%' THEN 'DLT Pipeline'\n    ELSE 'Adhoc Cluster'\n  END AS cluster_type,\n  CASE\n    WHEN c.cluster_name LIKE 'job-%' THEN regexp_extract(c.cluster_name, '^job-(\\\\d+)-')\n    WHEN c.cluster_name LIKE 'dlt-%' THEN regexp_extract(c.cluster_name, '^dlt-(\\\\d+)-')\n    ELSE NULL\n  END AS job_or_pipeline_id,\n  c.*\nFROM system.compute.clusters c\n),\n \npx_all AS (\n  SELECT DISTINCT\n  sku_name,\n  pricing.default AS unit_price,\n  CASE \n  WHEN sku_name LIKE ('%ALL_PURPOSE%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%DLT%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%JOBS%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%SQL%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  ELSE unit_price::float\n  END AS sku_price\n  FROM system.billing.list_prices \n  QUALIFY ROW_NUMBER() OVER (PARTITION BY sku_name ORDER BY price_start_time DESC) = 1\n\n  ),\n\n-- Now tag combos can be matched in 2 separate ways: key only, or the key=value pair if optionall provided\nparsed_tagging_table AS (\n    WITH split_data AS (\n      SELECT \n        split(regexp_replace(:tagging_raw_architecture, '\\\\s+', ''), ';') AS kv_pairs\n    ),\n    exploded_data AS (\n      SELECT \n        monotonically_increasing_id() AS order_id,\n        explode(kv_pairs) AS kv_pair\n      FROM \n        split_data\n    ),\n    clean_keys AS (\n\n      SELECT \n        split(kv_pair, '=')[0] AS key,\n        COALESCE(split(kv_pair, '=')[1], '') AS value,\n        kv_pair AS combination,\n        CASE WHEN contains(kv_pair, '=') THEN 1 ELSE 0 END AS ContainsValuePair\n      FROM \n        exploded_data\n    ),\n\n    aggregated_data AS (\n      SELECT \n        collect_list(key) as keys,\n        collect_list(value) as values, \n        collect_list(CASE WHEN ContainsValuePair = 1 THEN combination END) as KVCombos\n      FROM \n        clean_keys\n    ),\n\n    clean_aggs AS (\n    SELECT \n      map_from_arrays(keys, values) AS result_map,\n      KVCombos\n    FROM \n      aggregated_data LIMIT 1\n    )\n\n    SELECT \n    -- map with only keys\n    MAP_FILTER(result_map, (key, value) -> value = '') AS filtered_map,\n    -- entries that need to match both key and value pairs\n    KVCombos\n    FROM clean_aggs\n)\n\nSELECT \nu.*,\nc.*,\nu.workspace_id AS clean_workspace_id,\n-- Calcualte LIST Prices (unless discounts are baked in above in px_all table)\nsku_price*usage_quantity AS Dollar_DBUs,\n-- Clean up cluster / warehouse ids from all places\nCOALESCE(c.cluster_id, u.usage_metadata.cluster_id, usage_metadata.warehouse_id) AS clean_cluster_id,\nCOALESCE(c.job_or_pipeline_id, u.usage_metadata.job_id, u.usage_metadata.dlt_pipeline_id, 'Adhoc Or Serving') AS clean_job_or_pipeline_id,\n\nCASE WHEN u.sku_name LIKE ('%SERVERLESS%') OR u.product_features.is_serverless = 'true' THEN 'Serverless' ELSE 'Self-hosted' END AS IsServerless,\n-- Tagging Policy Identification and Enforcement\n\n-- Get Total Keys Required\n-- Now tag combos can be matched in 2 separate ways: key only, or the key=value pair if optionall provided\n\n(SELECT MAX(size(map_keys(filtered_map)) + size(KVCombos)) FROM parsed_tagging_table) AS TotalPolicyTags,\n\n-- When only keys are provided, link keys, but when result_map has a value, check the set of the whole k=v pair\n(\n  ARRAY_DISTINCT(\n      CONCAT(\n          array_intersect(map_keys(u.custom_tags), (SELECT MAX(map_keys(filtered_map)) FROM parsed_tagging_table)) \n          ,array_intersect(\n              TRANSFORM(\n              MAP_KEYS(custom_tags),\n              key -> CONCAT(key, '=', custom_tags[key])\n            ), (SELECT MAX(KVCombos) FROM parsed_tagging_table)\n                          )\n            )\n  )\n) AS CompliantTagKeys,\n\narray_except((SELECT MAX(map_keys(filtered_map)) FROM parsed_tagging_table), map_keys(u.custom_tags)) AS MissingTagKeys,\nsize(CompliantTagKeys) AS NumberOfCompliantKeys,\narray_join(CompliantTagKeys, '_') AS TagPolicyKeys,\n\narray_join(\n  CONCAT(transform(CompliantTagKeys, key -> CONCAT(key, '=', u.custom_tags[key])), -- Get Compliant keys without value pair\n  FILTER(CompliantTagKeys, x -> POSITION('=' IN x) > 0) -- Pull out the compliant values with the key pair\n  )\n  , ';') AS CompliantValues,\n\nCASE WHEN NumberOfCompliantKeys >= TotalPolicyTags THEN 'Compliant' ELSE 'Not Compliant To Tag Policy' END AS IsTaggingCompliant\n\nFROM system.billing.usage AS u\nINNER JOIN px_all AS px ON px.sku_name = u.sku_name\nLEFT JOIN compute AS c\n    ON (c.cluster_id = u.usage_metadata.cluster_id\n        AND (   (c.job_or_pipeline_id = u.usage_metadata.job_id)\n                OR (c.job_or_pipeline_id = u.usage_metadata.dlt_pipeline_id)\n                OR (c.job_or_pipeline_id = 'Adhoc')\n            )\n    )\nORDER BY size(CompliantTagKeys) DESC",
       "parameters": [
         {
           "displayName": "tagging_raw_architecture",
@@ -21,6 +21,73 @@
           }
         }
       ]
+    },
+    {
+      "name": "81757e3a",
+      "displayName": "Billing Momentum Indicators",
+      "query": "/*\nThis query actually filters on the same tagging framework as the other query as well as date range and product category \nand trends trailing usage metrics as well as moving averages for them\n*/\n\n\nWITH px_all AS (\n  SELECT DISTINCT\n  sku_name,\n  pricing.default AS unit_price,\n  CASE \n  WHEN sku_name LIKE ('%ALL_PURPOSE%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%DLT%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%JOBS%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  WHEN sku_name LIKE ('%SQL%') THEN (unit_price::float * (1-0.0)::float)::float -- Input SKU level discounts here\n  ELSE unit_price::float\n  END AS sku_price\n  FROM system.billing.list_prices \n  QUALIFY ROW_NUMBER() OVER (PARTITION BY sku_name ORDER BY price_start_time DESC) = 1\n  ),\n\n\n-- Now tag combos can be matched in 2 separate ways: key only, or the key=value pair if optionall provided\nparsed_tagging_table AS (\n    WITH split_data AS (\n      SELECT \n        split(regexp_replace(:tagging_raw_architecture, '\\\\s+', ''), ';') AS kv_pairs\n    ),\n    exploded_data AS (\n      SELECT \n        monotonically_increasing_id() AS order_id,\n        explode(kv_pairs) AS kv_pair\n      FROM \n        split_data\n    ),\n    clean_keys AS (\n\n      SELECT \n        split(kv_pair, '=')[0] AS key,\n        COALESCE(split(kv_pair, '=')[1], '') AS value,\n        kv_pair AS combination,\n        CASE WHEN contains(kv_pair, '=') THEN 1 ELSE 0 END AS ContainsValuePair\n      FROM \n        exploded_data\n    ),\n\n    aggregated_data AS (\n      SELECT \n        collect_list(key) as keys,\n        collect_list(value) as values, \n        collect_list(CASE WHEN ContainsValuePair = 1 THEN combination END) as KVCombos\n      FROM \n        clean_keys\n    ),\n\n    clean_aggs AS (\n    SELECT \n      map_from_arrays(keys, values) AS result_map,\n      KVCombos\n    FROM \n      aggregated_data LIMIT 1\n    )\n\n    SELECT \n    -- map with only keys\n    MAP_FILTER(result_map, (key, value) -> value = '') AS filtered_map,\n    -- entries that need to match both key and value pairs\n    KVCombos\n    FROM clean_aggs\n),\n\n\nfiltered_usage AS (\n  SELECT u.*,\n  usage_quantity*px.sku_price AS DollarDBUs,\n\n  -- Custom Tagging Filtering System\n  (SELECT MAX(size(map_keys(filtered_map)) + size(KVCombos)) FROM parsed_tagging_table) AS TotalPolicyTags,\n\n  -- When only keys are provided, link keys, but when result_map has a value, check the set of the whole k=v pair\n  (\n    ARRAY_DISTINCT(\n        CONCAT(\n            array_intersect(map_keys(u.custom_tags), (SELECT MAX(map_keys(filtered_map)) FROM parsed_tagging_table)) \n            ,array_intersect(\n                TRANSFORM(\n                MAP_KEYS(custom_tags),\n                key -> CONCAT(key, '=', custom_tags[key])\n              ), (SELECT MAX(KVCombos) FROM parsed_tagging_table)\n                            )\n              )\n    )\n  ) AS CompliantTagKeys,\n\n  array_except((SELECT MAX(map_keys(filtered_map)) FROM parsed_tagging_table), map_keys(u.custom_tags)) AS MissingTagKeys,\n  size(CompliantTagKeys) AS NumberOfCompliantKeys,\n  array_join(CompliantTagKeys, '_') AS TagPolicyKeys,\n\n  array_join(\n    CONCAT(transform(CompliantTagKeys, key -> CONCAT(key, '=', u.custom_tags[key])), -- Get Compliant keys without value pair\n    FILTER(CompliantTagKeys, x -> POSITION('=' IN x) > 0) -- Pull out the compliant values with the key pair\n    )\n    , ';') AS CompliantValues,\n\n  CASE \n  WHEN length(:tagging_raw_architecture) = 0 OR :tagging_raw_architecture IS NULL OR :tagging_raw_architecture = 'all' THEN 'Compliant'\n  WHEN NumberOfCompliantKeys >= TotalPolicyTags \n    THEN 'Compliant' \n  ELSE 'Not Compliant To Tag Policy' END AS IsTaggingCompliant\n  FROM system.billing.usage u\n  INNER JOIN px_all px ON px.sku_name = u.sku_name\n    WHERE \n    -- Date Filter\n    usage_date BETWEEN :usage_start AND :usage_end\n    AND \n    -- Product Filter\n    (CASE WHEN :product_category = 'all' THEN 1=1 ELSE\n       ARRAY_CONTAINS(split(:product_category, ';'), u.billing_origin_product)\n       END)\n\n),\n\nclean_usage AS (\n    SELECT usage_date, SUM(usage_quantity) AS DBUs, \n    SUM(DollarDBUs) AS DollarDBUs,\n    ROW_NUMBER() OVER (ORDER BY usage_date DESC) AS rn\n    FROM filtered_usage u\n    WHERE IsTaggingCompliant = 'Compliant'\n    GROUP BY usage_date\n),\n\nT7D_query AS (\n  (SELECT SUM(DollarDBUs) AS T7D FROM clean_usage WHERE rn <= 7)\n),\nT30D_query AS (\n  (SELECT SUM(DollarDBUs) AS T30D FROM clean_usage WHERE rn <= 30)\n),\nT90D_query AS (\n  (SELECT SUM(DollarDBUs) AS T90D FROM clean_usage WHERE rn <= 90)\n),\nT365D_query AS (\n  (SELECT SUM(DollarDBUs) AS T365D FROM clean_usage WHERE rn <= 365)\n)\n\n\n-- Final Query\nSELECT\n    usage_date,\n    DollarDBUs,\n-- Calculate Trailing usage right here in subueries\n  (SELECT MAX(T7D) FROM T7D_query) AS T7D_Dollars,\n  (SELECT MAX(T30D) FROM T30D_query) AS T30D_Dollars,\n  (SELECT MAX(T90D) FROM T90D_query) AS T90D_Dollars,\n  (SELECT MAX(T365D) FROM T365D_query) AS T365D_Dollars,\n    AVG(DollarDBUs) OVER (\n        ORDER BY usage_date\n        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW\n    ) AS avg_7d,\n    AVG(DollarDBUs) OVER (\n        ORDER BY usage_date\n        ROWS BETWEEN 29 PRECEDING AND CURRENT ROW\n    ) AS avg_30d,\n    AVG(DollarDBUs) OVER (\n        ORDER BY usage_date\n        ROWS BETWEEN 89 PRECEDING AND CURRENT ROW\n    ) AS avg_90d,\n    AVG(DollarDBUs) OVER (\n        ORDER BY usage_date\n        ROWS BETWEEN 364 PRECEDING AND CURRENT ROW\n    ) AS avg_365d\nFROM -- Roll up to daily level, keep nice a simple for OOTB use cases\n    (SELECT usage_date, SUM(usage_quantity) AS DBUs, \n    SUM(DollarDBUs) AS DollarDBUs,\n    ROW_NUMBER() OVER (ORDER BY usage_date DESC) AS rn\n    FROM filtered_usage u\n    WHERE IsTaggingCompliant = 'Compliant'\n    GROUP BY usage_date\n    )\n-- Optional, depending on your needs: WHERE clause to filter rows\nORDER BY\n    usage_date;",
+      "parameters": [
+        {
+          "displayName": "tagging_raw_architecture",
+          "keyword": "tagging_raw_architecture",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "demo;project=dbdemos"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "usage_start",
+          "keyword": "usage_start",
+          "dataType": "DATETIME",
+          "defaultSelection": {
+            "values": {
+              "dataType": "DATETIME",
+              "values": [
+                {
+                  "value": "2024-04-14T21:21:45.000"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "usage_end",
+          "keyword": "usage_end",
+          "dataType": "DATETIME",
+          "defaultSelection": {
+            "values": {
+              "dataType": "DATETIME",
+              "values": [
+                {
+                  "value": "2024-04-21T21:21:48.000"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "product_category",
+          "keyword": "product_category",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "all"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   ],
   "pages": [
@@ -28,6 +95,18 @@
       "name": "f14f0acb",
       "displayName": "New Page",
       "layout": [
+        {
+          "widget": {
+            "name": "0c5a1e5b",
+            "textbox_spec": "-----\n## Trending Workload Dashbaord with Trailing and Moving Averages For Usage with Dynamic Filters\n-----\n** The above filters do NOT affect this section"
+          },
+          "position": {
+            "x": 0,
+            "y": 70,
+            "width": 6,
+            "height": 2
+          }
+        },
         {
           "widget": {
             "name": "0c9b87fb",
@@ -54,7 +133,7 @@
               "version": 3,
               "widgetType": "bar",
               "encodings": {
-                "y": {
+                "x": {
                   "fieldName": "sum(Dollar_DBUs)",
                   "scale": {
                     "type": "quantitative"
@@ -72,6 +151,10 @@
                       {
                         "value": "Serverless",
                         "color": "#00A972"
+                      },
+                      {
+                        "value": "Hosted",
+                        "color": "#1356d4"
                       }
                     ]
                   },
@@ -96,9 +179,9 @@
           },
           "position": {
             "x": 0,
-            "y": 6,
-            "width": 1,
-            "height": 7
+            "y": 9,
+            "width": 2,
+            "height": 4
           }
         },
         {
@@ -106,16 +189,16 @@
             "name": "0d11b576",
             "queries": [
               {
-                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_SkuCategory",
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_billing_origin_product",
                 "query": {
                   "datasetName": "19088371",
                   "fields": [
                     {
-                      "name": "SkuCategory",
-                      "expression": "`SkuCategory`"
+                      "name": "billing_origin_product",
+                      "expression": "`billing_origin_product`"
                     },
                     {
-                      "name": "SkuCategory_associativity",
+                      "name": "billing_origin_product_associativity",
                       "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
@@ -129,15 +212,15 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "SkuCategory",
-                    "displayName": "SkuCategory",
-                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_SkuCategory"
+                    "fieldName": "billing_origin_product",
+                    "displayName": "billing_origin_product",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_billing_origin_product"
                   }
                 ]
               },
               "frame": {
                 "showTitle": true,
-                "title": "Category"
+                "title": "Product Category"
               }
             }
           },
@@ -155,14 +238,14 @@
           },
           "position": {
             "x": 0,
-            "y": 37,
+            "y": 43,
             "width": 6,
             "height": 2
           }
         },
         {
           "widget": {
-            "name": "19704c98",
+            "name": "161f4ef3",
             "queries": [
               {
                 "name": "main_query",
@@ -170,12 +253,8 @@
                   "datasetName": "19088371",
                   "fields": [
                     {
-                      "name": "clean_cluster_id",
-                      "expression": "`clean_cluster_id`"
-                    },
-                    {
-                      "name": "cluster_type",
-                      "expression": "`cluster_type`"
+                      "name": "IsTaggingCompliant",
+                      "expression": "`IsTaggingCompliant`"
                     },
                     {
                       "name": "sum(Dollar_DBUs)",
@@ -195,6 +274,171 @@
                   "scale": {
                     "type": "quantitative"
                   },
+                  "axis": {
+                    "title": "$DBUs"
+                  },
+                  "displayName": "Cluster Ids"
+                },
+                "color": {
+                  "fieldName": "IsTaggingCompliant",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Not Compliant To Tag Policy",
+                        "color": "#FF3621"
+                      },
+                      {
+                        "value": "Compliant",
+                        "color": "#00A972"
+                      }
+                    ]
+                  },
+                  "displayName": "Tag Policy Compliance"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "$ DBUs By Compliance"
+              },
+              "mark": {
+                "layout": "percent-stack"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 45,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "16a69de1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "fields": [
+                    {
+                      "name": "max(T7D_Dollars)",
+                      "expression": "MAX(`T7D_Dollars`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max(T7D_Dollars)",
+                  "displayName": "Maximum T7D_Dollars"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": "T7D $ DBUs"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 77,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "16d4bfe4",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01ef004f37b017e0a962daeb1e48b37e_tagging_raw_architecture",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "parameters": [
+                    {
+                      "name": "tagging_raw_architecture",
+                      "keyword": "tagging_raw_architecture"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "tagging_raw_architecture",
+                    "queryName": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01ef004f37b017e0a962daeb1e48b37e_tagging_raw_architecture"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "Tagging Dynamic Filter",
+                "description": "Define a tagging filter here in the format of \nkey1=value1;key2=value2 (values are optional). If values are povided, this also enforces the provided values. \n\nFrom this, the visuals in this section will FILTER the clusters/jobs that adhere to this policy so you can see usage by this tagging architecture (for single tag keys, do not include the ; )"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 72,
+            "width": 2,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "19704c98",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "billing_origin_product",
+                      "expression": "`billing_origin_product`"
+                    },
+                    {
+                      "name": "clean_cluster_id",
+                      "expression": "`clean_cluster_id`"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative",
+                    "fn": {
+                      "type": "symlog"
+                    }
+                  },
                   "displayName": "Usage ($ DBUs)"
                 },
                 "y": {
@@ -208,7 +452,7 @@
                   "displayName": "Cluster / Warehouse Id"
                 },
                 "color": {
-                  "fieldName": "cluster_type",
+                  "fieldName": "billing_origin_product",
                   "scale": {
                     "type": "categorical"
                   },
@@ -223,9 +467,9 @@
           },
           "position": {
             "x": 3,
-            "y": 20,
+            "y": 26,
             "width": 3,
-            "height": 9
+            "height": 17
           }
         },
         {
@@ -264,13 +508,15 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Is Compliant to Tag Policy?"
+                "title": "Is Compliant to Tag Policy?",
+                "showDescription": true,
+                "description": "Define tag policy below"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 39,
+            "y": 45,
             "width": 1,
             "height": 2
           }
@@ -278,13 +524,101 @@
         {
           "widget": {
             "name": "218121d7",
-            "textbox_spec": "# Cluster Advisor Dashboard\n\n#### Section 1 - Billing Advisor - See where your costs are going\n#### Section 2 - Tagging Manager - Implement, Audit, and Enforce Tagging Policies across all compute\n\n-----\n### TO DO: \n\n1. Add $DBUs and cluster pricing - list rates for now\n2. Add tagging capabilities - WAL in App\n3. Add T7, 30, 90, 365 Rolling Spend Metrics - top level but dynamic"
+            "textbox_spec": "# Billing Advisor Dashboard\n\n#### Section 1 - Billing Advisor - See where your costs are going\n#### Section 2 - Tagging Manager - Implement, Audit, and Enforce Tagging Policies across all compute\n#### Section 3 - Billing Momentum & Trends Analysis With Custom Tagging Filters\n-----\n### TO DO: \n\n1. Add async tagging capabilities - WAL in App"
           },
           "position": {
             "x": 0,
             "y": 0,
             "width": 6,
             "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "21b80a28",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "clean_workspace_id",
+                      "expression": "`clean_workspace_id`"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative",
+                    "reverse": false
+                  },
+                  "axis": {
+                    "title": "Total Usage ($ DBUs)"
+                  },
+                  "displayName": "Total Usage ($ DBUs)"
+                },
+                "y": {
+                  "fieldName": "clean_workspace_id",
+                  "displayName": "Workspace Id",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "clean_workspace_id",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Serverless",
+                        "color": "#00A972"
+                      },
+                      {
+                        "value": "Hosted",
+                        "color": "#1356d4"
+                      }
+                    ]
+                  },
+                  "legend": {
+                    "position": "bottom",
+                    "title": "Workspace"
+                  },
+                  "displayName": "SKU Category"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Spend By Workspace"
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 6,
+            "width": 2,
+            "height": 7
           }
         },
         {
@@ -331,10 +665,128 @@
             }
           },
           "position": {
+            "x": 0,
+            "y": 6,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "293147d1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "billing_origin_product",
+                      "expression": "`billing_origin_product`"
+                    },
+                    {
+                      "name": "sum(Dollar_DBUs)",
+                      "expression": "SUM(`Dollar_DBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(Dollar_DBUs)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Total Usage ($ DBUs)"
+                  },
+                  "displayName": "Total Usage ($ DBUs)"
+                },
+                "y": {
+                  "fieldName": "billing_origin_product",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Product Category"
+                },
+                "color": {
+                  "fieldName": "billing_origin_product",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "ALL_PURPOSE",
+                        "color": "#0f4ad3"
+                      }
+                    ]
+                  },
+                  "displayName": "billing_origin_product"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Spend By Product Category"
+              }
+            }
+          },
+          "position": {
             "x": 4,
-            "y": 4,
+            "y": 6,
             "width": 2,
-            "height": 2
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "2a57b375",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "countdistinct(clean_workspace_id)",
+                      "expression": "COUNT(DISTINCT `clean_workspace_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(clean_workspace_id)",
+                  "displayName": "Count of Unique clean_workspace_id"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Workspace Count",
+                "showDescription": false,
+                "description": ""
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 6,
+            "width": 1,
+            "height": 3
           }
         },
         {
@@ -403,8 +855,8 @@
           },
           "position": {
             "x": 0,
-            "y": 29,
-            "width": 6,
+            "y": 35,
+            "width": 3,
             "height": 8
           }
         },
@@ -434,7 +886,7 @@
               "version": 3,
               "widgetType": "bar",
               "encodings": {
-                "y": {
+                "x": {
                   "fieldName": "countdistinct(clean_cluster_id)",
                   "scale": {
                     "type": "quantitative"
@@ -456,7 +908,7 @@
                       }
                     ]
                   },
-                  "displayName": "IsTaggingCompliant"
+                  "displayName": "Tag Policy Compliance"
                 },
                 "label": {
                   "show": true
@@ -472,10 +924,51 @@
             }
           },
           "position": {
-            "x": 0,
+            "x": 4,
             "y": 45,
             "width": 2,
             "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "49e1f3a5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "fields": [
+                    {
+                      "name": "sum(DollarDBUs)",
+                      "expression": "SUM(`DollarDBUs`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(DollarDBUs)",
+                  "displayName": "Sum of DollarDBUs"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": "Total Usage ($ DBU)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 77,
+            "width": 2,
+            "height": 3
           }
         },
         {
@@ -507,7 +1000,10 @@
                 "x": {
                   "fieldName": "sum(Dollar_DBUs)",
                   "scale": {
-                    "type": "quantitative"
+                    "type": "quantitative",
+                    "fn": {
+                      "type": "symlog"
+                    }
                   },
                   "axis": {
                     "title": "Usage ($ DBUs)"
@@ -543,9 +1039,219 @@
           },
           "position": {
             "x": 0,
-            "y": 20,
+            "y": 26,
             "width": 3,
             "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "4deb33f7",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01ef004f37b017e0a962daeb1e48b37e_usage_end",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "parameters": [
+                    {
+                      "name": "usage_end",
+                      "keyword": "usage_end"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "usage_end",
+                    "queryName": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01ef004f37b017e0a962daeb1e48b37e_usage_end"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage End"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 72,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "55b39388",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01ef004f37b017e0a962daeb1e48b37e_product_category",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "parameters": [
+                    {
+                      "name": "product_category",
+                      "keyword": "product_category"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "product_category",
+                    "queryName": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01ef004f37b017e0a962daeb1e48b37e_product_category"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "Product Category Filter",
+                "description": "Shows which product category(s) you want to view (names of categories above in filter)\n\n* If left blank or 'all', then no filter will be applied"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 74,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "55ee02ee",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "fields": [
+                    {
+                      "name": "max(T365D_Dollars)",
+                      "expression": "MAX(`T365D_Dollars`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max(T365D_Dollars)",
+                  "displayName": "Maximum T365D_Dollars"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": "T365D $ DBUs"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 77,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "63d7293a",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "fields": [
+                    {
+                      "name": "max(T30D_Dollars)",
+                      "expression": "MAX(`T30D_Dollars`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max(T30D_Dollars)",
+                  "displayName": "Maximum T30D_Dollars"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": "T30D $ DBUs"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 77,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "6682df10",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01ef004f37b017e0a962daeb1e48b37e_usage_start",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "parameters": [
+                    {
+                      "name": "usage_start",
+                      "keyword": "usage_start"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "usage_start",
+                    "queryName": "parameter_dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01ef004f37b017e0a962daeb1e48b37e_usage_start"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage Start"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 72,
+            "width": 2,
+            "height": 2
           }
         },
         {
@@ -581,13 +1287,13 @@
                 "showTitle": true,
                 "title": "Dynamic Tagging Policy",
                 "showDescription": true,
-                "description": "Define a tagging architecture here in the format of \nkey1=value1;key2=value2 (values are optional). If values are povided, this also enforces the provided values. \n\nFrom this, the visuals in this section will identify which clusters/jobs enforce this policy so you can see usage by this tagging architecture as well as identify improperly tagged clusters/jobs. "
+                "description": "Define a tagging architecture here in the format of \nkey1=value1;key2=value2 (values are optional). If values are povided, this also enforces the provided values. \n\nFrom this, the visuals in this section will identify which clusters/jobs enforce this policy so you can see usage by this tagging architecture as well as identify improperly tagged clusters/jobs. (for single tag keys, do not include ;)"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 41,
+            "y": 47,
             "width": 2,
             "height": 4
           }
@@ -628,13 +1334,15 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Missing Tag Keys"
+                "title": "Missing Tag Keys",
+                "showDescription": true,
+                "description": "Define tag policy below"
               }
             }
           },
           "position": {
             "x": 1,
-            "y": 39,
+            "y": 45,
             "width": 1,
             "height": 2
           }
@@ -649,8 +1357,16 @@
                   "datasetName": "19088371",
                   "fields": [
                     {
+                      "name": "CompliantValues",
+                      "expression": "`CompliantValues`"
+                    },
+                    {
                       "name": "IsTaggingCompliant",
                       "expression": "`IsTaggingCompliant`"
+                    },
+                    {
+                      "name": "MissingTagKeys",
+                      "expression": "`MissingTagKeys`"
                     },
                     {
                       "name": "clean_cluster_id",
@@ -697,6 +1413,14 @@
                     },
                     {
                       "direction": "ASC",
+                      "expression": "`CompliantValues`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`MissingTagKeys`"
+                    },
+                    {
+                      "direction": "ASC",
                       "expression": "`IsTaggingCompliant`"
                     },
                     {
@@ -727,6 +1451,14 @@
                   {
                     "fieldName": "identity_metadata",
                     "displayName": "identity_metadata"
+                  },
+                  {
+                    "fieldName": "CompliantValues",
+                    "displayName": "CompliantValues"
+                  },
+                  {
+                    "fieldName": "MissingTagKeys",
+                    "displayName": "MissingTagKeys"
                   }
                 ],
                 "columns": [
@@ -747,13 +1479,15 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Clusters & Jobs/DLT pipelines By Compliance"
+                "title": "Clusters & Jobs/DLT pipelines By Compliance",
+                "showDescription": true,
+                "description": "Pivot Table / Report To Identify Untagged Clusters / Jobs that do not adhere to the defined tagging policy (value is the count of billing record hours)"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 51,
+            "y": 63,
             "width": 6,
             "height": 7
           }
@@ -799,7 +1533,7 @@
             }
           },
           "position": {
-            "x": 2,
+            "x": 4,
             "y": 4,
             "width": 2,
             "height": 2
@@ -961,6 +1695,9 @@
                       }
                     ]
                   },
+                  "legend": {
+                    "title": "Tag Key Values (values of all tag keys in policy)"
+                  },
                   "displayName": "Tag Keys"
                 }
               },
@@ -971,10 +1708,139 @@
             }
           },
           "position": {
-            "x": 2,
-            "y": 45,
-            "width": 4,
+            "x": 0,
+            "y": 57,
+            "width": 6,
             "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b94bdc7f",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "fields": [
+                    {
+                      "name": "max(T90D_Dollars)",
+                      "expression": "MAX(`T90D_Dollars`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max(T90D_Dollars)",
+                  "displayName": "Maximum T90D_Dollars"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": "T90D $ DBUs"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 77,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "bbc87625",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "81757e3a",
+                  "fields": [
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "sum(avg_30d)",
+                      "expression": "SUM(`avg_30d`)"
+                    },
+                    {
+                      "name": "sum(avg_365d)",
+                      "expression": "SUM(`avg_365d`)"
+                    },
+                    {
+                      "name": "sum(avg_7d)",
+                      "expression": "SUM(`avg_7d`)"
+                    },
+                    {
+                      "name": "sum(avg_90d)",
+                      "expression": "SUM(`avg_90d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(usage_date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative",
+                    "fn": {
+                      "type": "symlog"
+                    }
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "sum(avg_7d)",
+                      "displayName": "7d Moving Average"
+                    },
+                    {
+                      "fieldName": "sum(avg_30d)",
+                      "displayName": "30d Moving Average"
+                    },
+                    {
+                      "fieldName": "sum(avg_90d)",
+                      "displayName": "90d Moving Average"
+                    },
+                    {
+                      "fieldName": "sum(avg_365d)",
+                      "displayName": "365d Moving Average"
+                    }
+                  ],
+                  "axis": {
+                    "title": "Usage $ DBUs"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage Momentum Moving Averages (7d, 30d, 90d, 365d)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 80,
+            "width": 6,
+            "height": 8
           }
         },
         {
@@ -1065,7 +1931,7 @@
             }
           },
           "position": {
-            "x": 0,
+            "x": 2,
             "y": 4,
             "width": 2,
             "height": 2
@@ -1114,6 +1980,53 @@
           "position": {
             "x": 0,
             "y": 2,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "d7cf9278",
+            "queries": [
+              {
+                "name": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_clean_workspace_id",
+                "query": {
+                  "datasetName": "19088371",
+                  "fields": [
+                    {
+                      "name": "clean_workspace_id",
+                      "expression": "`clean_workspace_id`"
+                    },
+                    {
+                      "name": "clean_workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "clean_workspace_id",
+                    "displayName": "clean_workspace_id",
+                    "queryName": "dashboards/01eeed27c1e41344b1a06cd65ca8285c/datasets/01eeffb505f316c6bd35a4e4a020cee6_clean_workspace_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Workspace Id"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
             "width": 2,
             "height": 2
           }
@@ -1170,6 +2083,10 @@
                       {
                         "value": "Delta Live Tables",
                         "color": "#0567c6"
+                      },
+                      {
+                        "value": "ENTERPRISE_ALL_PURPOSE_COMPUTE",
+                        "color": "#1356d4"
                       }
                     ]
                   },
@@ -1190,7 +2107,7 @@
           },
           "position": {
             "x": 0,
-            "y": 13,
+            "y": 19,
             "width": 6,
             "height": 7
           }
@@ -1271,9 +2188,9 @@
             }
           },
           "position": {
-            "x": 2,
-            "y": 39,
-            "width": 4,
+            "x": 0,
+            "y": 51,
+            "width": 6,
             "height": 6
           }
         },
@@ -1287,8 +2204,8 @@
                   "datasetName": "19088371",
                   "fields": [
                     {
-                      "name": "SkuCategory",
-                      "expression": "`SkuCategory`"
+                      "name": "billing_origin_product",
+                      "expression": "`billing_origin_product`"
                     },
                     {
                       "name": "daily(usage_date)",
@@ -1325,7 +2242,7 @@
                   "displayName": "$ DBUs"
                 },
                 "color": {
-                  "fieldName": "SkuCategory",
+                  "fieldName": "billing_origin_product",
                   "scale": {
                     "type": "categorical",
                     "mappings": [
@@ -1344,6 +2261,10 @@
                       {
                         "value": "Jobs",
                         "color": "#077A9D"
+                      },
+                      {
+                        "value": "ALL_PURPOSE",
+                        "color": "#1356d4"
                       }
                     ]
                   },
@@ -1352,6 +2273,9 @@
                     "position": "bottom"
                   },
                   "displayName": "Category"
+                },
+                "label": {
+                  "show": false
                 }
               },
               "frame": {
@@ -1361,10 +2285,10 @@
             }
           },
           "position": {
-            "x": 1,
-            "y": 6,
-            "width": 5,
-            "height": 7
+            "x": 0,
+            "y": 13,
+            "width": 6,
+            "height": 6
           }
         }
       ]
