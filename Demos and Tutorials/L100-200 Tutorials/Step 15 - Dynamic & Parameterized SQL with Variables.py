@@ -15,7 +15,7 @@
 # MAGIC ## New SQL Variables
 # MAGIC
 # MAGIC - DBR 14.1+
-# MAGIC - Not yet on DBSQL
+# MAGIC - DBSQL v2024.15+
 
 # COMMAND ----------
 
