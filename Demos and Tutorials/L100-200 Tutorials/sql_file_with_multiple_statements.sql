@@ -1,3 +1,6 @@
+use {{catalog}};
+use {{schema}};
+
 select * from samples.tpch.customer
 where c_custkey = 412445 ;
 
