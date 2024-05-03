@@ -1,4 +1,47 @@
 -- Databricks notebook source
+DECLARE OR REPLACE VARIABLE catalog_name STRING DEFAULT 'samples';
+DECLARE OR REPLACE VARIABLE schema_name STRING DEFAULT 'tpch';
+
+-- COMMAND ----------
+
+-- DBTITLE 1,.sql file tests
+--use catalog identifier({{ catalog }});
+--use schema {{schema}};
+
+--select * from concat(identifier({{catalog}}), '.', identifier({{schema}})).customer
+
+DECLARE OR REPLACE VARIABLE catalog_name STRING DEFAULT 'samples';
+DECLARE OR REPLACE VARIABLE schema_name STRING DEFAULT 'tpch';
+DECLARE OR REPLACE VARIABLE table_name STRING DEFAULT {{catalog}} || '.' || {{schema}}  || '.' || {{table}};
+
+select table_name ;
+-- SELECT * FROM IDENTIFIER(catalog_name || '.' || schema_name  || '.' || 'customer');
+
+-- SELECT * FROM IDENTIFIER({{catalog}} || '.' || {{schema}}  || '.' || {{table}});
+
+-- SELECT * FROM IDENTIFIER(table_name);
+
+-- COMMAND ----------
+
+USE CATALOG samples;
+
+-- COMMAND ----------
+
+USE schema schema_name
+
+-- COMMAND ----------
+
+-- Get max process timestamp in silver table
+DECLARE OR REPLACE VARIABLE watermark_timestamp TIMESTAMP DEFAULT '1900-01-01 00:00:00'::timestamp'
+
+-- COMMAND ----------
+
+
+use catalog samples;
+use schema tpch;
+
+-- COMMAND ----------
+
 DECLARE stmtStr = 'SELECT current_timestamp() + :later, :x * :x AS square';
 EXECUTE IMMEDIATE stmtStr USING INTERVAL '3' HOURS AS later, 15.0 AS x;
 
