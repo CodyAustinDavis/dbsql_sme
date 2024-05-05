@@ -1,9 +1,12 @@
-USE CATALOG MAIN;
-USE SCHEMA DEFAULT;
+DECLARE OR REPLACE VARIABLE catalog_name STRING DEFAULT 'main';
+DECLARE OR REPLACE VARIABLE schema_name STRING DEFAULT 'default';
+
+SET VAR catalog_name = {{catalog}};
+SET VAR schema_name = {{schema}};
 
 --  1/ Create a Dimension & Fact Tables In Unity Catalog
 --STORE DIMENSION
-CREATE OR REPLACE  TABLE dim_store(
+CREATE OR REPLACE  TABLE identifier({{catalog}} || '.' || {{schema}}  || '.' || 'dim_store') (
   store_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   store_name STRING,
   address STRING
