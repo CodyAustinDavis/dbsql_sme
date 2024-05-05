@@ -1,6 +1,3 @@
-
-
-
 -- Option 1 - passing workflow parameters 
 SELECT * FROM identifier({{catalog}} || '.' || {{schema}}  || '.' || 'customer');
 
