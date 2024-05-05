@@ -1,8 +1,8 @@
 DECLARE OR REPLACE VARIABLE catalog_name STRING DEFAULT 'main';
 DECLARE OR REPLACE VARIABLE schema_name STRING DEFAULT 'default';
 
-SET VAR catalog_name = {{catalog}};
-SET VAR schema_name = {{schema}};
+SET VAR catalog_name = {{catalog_param}};
+SET VAR schema_name = {{schema_param}};
 
 
 -- ### Query the tables joining data
