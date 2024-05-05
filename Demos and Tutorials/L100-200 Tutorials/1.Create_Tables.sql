@@ -1,8 +1,8 @@
 DECLARE OR REPLACE VARIABLE catalog_name STRING DEFAULT 'main';
 DECLARE OR REPLACE VARIABLE schema_name STRING DEFAULT 'default';
 
-SET VAR catalog_name = {{catalog}};
-SET VAR schema_name = {{schema}};
+SET VAR catalog_name = 'main' --{{catalog}};
+SET VAR schema_name = 'default' --{{schema}};
 
 -- USE CATALOG main;
 -- USE SCHEMA default;
