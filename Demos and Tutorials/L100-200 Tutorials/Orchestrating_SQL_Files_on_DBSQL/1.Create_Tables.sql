@@ -1,6 +1,5 @@
 USE CATALOG main;
 USE SCHEMA default;
-
 --  1/ Create a Dimension & Fact Tables In Unity Catalog
 --STORE DIMENSION
 --CREATE OR REPLACE  TABLE IDENTIFIER(catalog_name || '.' || schema_name  || '.' || 'dim_store') (
