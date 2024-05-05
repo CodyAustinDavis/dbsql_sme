@@ -1,3 +1,0 @@
--- Databricks notebook source
--- use catalog {{catalog}};
--- use schema {{schema}};
