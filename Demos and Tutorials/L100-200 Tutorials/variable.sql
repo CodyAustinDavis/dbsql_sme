@@ -11,7 +11,5 @@ DECLARE OR REPLACE VARIABLE schema_name STRING DEFAULT 'tpch';
 SET VAR catalog_name = {{catalog}};
 SET VAR schema_name = {{schema}};
 
-USE CATALOG catalog_name;
-USE SCHEMA schema_name;
 
 SELECT * FROM IDENTIFIER(catalog_name || '.' || schema_name  || '.' || 'customer');
