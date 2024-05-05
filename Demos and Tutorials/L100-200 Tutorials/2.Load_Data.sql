@@ -2,7 +2,7 @@ DECLARE OR REPLACE VARIABLE catalog_name STRING DEFAULT 'main';
 DECLARE OR REPLACE VARIABLE schema_name STRING DEFAULT 'default';
 
 SET VAR catalog_name = {{catalog_param}};
-SET VAR schema_name = {{catalog_param}};
+SET VAR schema_name = {{schema_param}};
 
 -- 2/ Let's add some data to the Dimension Tables
 INSERT INTO
