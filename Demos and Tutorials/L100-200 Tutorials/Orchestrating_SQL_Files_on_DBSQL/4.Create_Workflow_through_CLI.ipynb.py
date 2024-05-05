@@ -5,7 +5,7 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Job Create using CLI
+# MAGIC Job Create using CLI 
 
 # COMMAND ----------
 
