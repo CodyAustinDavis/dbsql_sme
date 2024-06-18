@@ -4,8 +4,8 @@ from query_sla_manager import QueryHistoryAlertManager
 # COMMAND ----------
 
 # DBTITLE 1,Notebook Secrets / Params
-host = "<host_name_url>"
-dbx_token = "<dbx_token_secret>"
+host = "<host_name>"
+dbx_token = "<dbx_token>"
 database_name = "main.query_alert_manager"
 
 # COMMAND ----------
