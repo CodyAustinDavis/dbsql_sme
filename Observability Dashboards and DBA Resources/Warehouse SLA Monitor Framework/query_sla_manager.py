@@ -75,6 +75,7 @@ class QueryHistoryAlertManager():
         self.cumulative_cycles = 0
         self.activate_batch_start_time = None
         self.active_batch_end_time = None
+        self.polling_frequency_seconds_default = polling_frequency_seconds
 
 
         ####
@@ -312,12 +313,7 @@ class QueryHistoryAlertManager():
                      )
                      MERGE INTO {self.database_name}.query_sla_policies AS t
                      USING new_policy AS s ON t.policy_hash = s.policy_hash
-                     WHEN MATCHED THEN UPDATE SET
-                      t.policy_hash = s.policy_hash,
-                      t.warehouse_ids = s.warehouse_ids,
-                      t.sla_seconds = s.sla_seconds,
-                      t.query_statuses = s.query_statuses,
-                      t.policy_mode = s.policy_mode
+                     -- No need to update a hashed unique policy - just insert a new one or delete one
                      WHEN NOT MATCHED THEN INSERT  (policy_hash, warehouse_ids, sla_seconds, query_statuses, policy_mode)
                      VALUES (s.policy_hash, s.warehouse_ids, s.sla_seconds, s.query_statuses, s.policy_mode)
                      """)
@@ -363,6 +359,83 @@ class QueryHistoryAlertManager():
         print(f"No policy id or hash selected. Skipping Delete")
       return    
     
+
+    def get_query_history_request(self, warehouse_ids: List[str], start_ts_ms, end_ts_ms, included_statuses: List[str]):
+            ## Put together request
+            
+            request_string = {
+                "filter_by": {
+                  "query_start_time_range": {
+                  "end_time_ms": end_ts_ms,
+                  "start_time_ms": start_ts_ms
+                },
+                "statuses": included_statuses,
+                "warehouse_ids": warehouse_ids
+                },
+                "include_metrics": "true",
+                "max_results": "1000"
+            }
+
+            ## Convert dict to json
+            v = json.dumps(request_string)
+            
+            uri = f"https://{self.workspace_url}/api/2.0/sql/history/queries"
+            headers_auth = {"Authorization":f"Bearer {self.dbx_token}"}
+            
+            #### Get Query History Results from API
+            endp_resp = requests.get(uri, data=v, headers=headers_auth).json()
+
+
+            #### Page through data
+            initial_resp = endp_resp.get("res")
+
+            #print(initial_resp)
+            
+            if initial_resp is None:
+                print(f"DBSQL Has no queries on the warehouses {', '.join(warehouse_ids)} for these times:{start_ts_ms} - {end_ts_ms}")
+                initial_resp = []
+                ## Continue anyways cause there could be old queries and we want to still compute aggregates
+            
+            
+            next_page = endp_resp.get("next_page_token")
+            has_next_page = endp_resp.get("has_next_page")
+
+            #print(has_next_page)
+
+            ## Page through results   
+            page_responses = []
+
+            while has_next_page is True: 
+
+                #print(f"Getting results for next page... {next_page}")
+
+                raw_page_request = {
+                "include_metrics": "true",
+                "max_results": 1000,
+                "page_token": next_page
+                }
+
+                json_page_request = json.dumps(raw_page_request)
+
+                ## This file could be large
+                current_page_resp = requests.get(uri,data=json_page_request, headers=headers_auth).json()
+                current_page_queries = current_page_resp.get("res")
+
+                ## Add Current results to total results or write somewhere (to s3?)
+
+                page_responses.append(current_page_queries)
+
+                ## Get next page
+                next_page = current_page_resp.get("next_page_token")
+                has_next_page = current_page_resp.get("has_next_page")
+
+                if has_next_page is False:
+                    break
+
+
+            all_responses = [x for xs in page_responses for x in xs] + initial_resp
+            return all_responses
+            
 
     ### Returns WarehousePolicy Object
     def get_sla_policy(self, policy_id = None, policy_hash = None):
@@ -413,7 +486,9 @@ class QueryHistoryAlertManager():
     
 
     #### Main Loop that polls query history with a loaded policy, separates normal queries from alert queries, saves alerts to db
-    def poll_with_policy(self, policy_id = None, policy_hash = None,
+    def poll_with_policy(self, 
+                         policy_id = None, 
+                         policy_hash = None,
                          start_over = False,
                          mode: str ='auto', 
                          cold_start_lookback_period_seconds: int = 600, 
@@ -441,7 +516,10 @@ class QueryHistoryAlertManager():
       active_policy_id = policy_id
 
       ### Poller Settings
-      polling_frequency_seconds = polling_frequency_seconds
+      if polling_frequency_seconds:
+        polling_frequency_seconds = polling_frequency_seconds
+      else:
+        polling_frequency_seconds = self.polling_frequency_seconds_default
 
       if hard_fail_after_n_attempts:
         self.hard_fail_after_n_attempts = hard_fail_after_n_attempts
@@ -475,79 +553,9 @@ class QueryHistoryAlertManager():
           self.active_batch_end_time = end_ts_ms
 
           
-          ## Put together request
-          
-          request_string = {
-              "filter_by": {
-                "query_start_time_range": {
-                "end_time_ms": end_ts_ms,
-                "start_time_ms": start_ts_ms
-              },
-              "statuses": included_statuses,
-              "warehouse_ids": warehouse_ids_list
-              },
-              "include_metrics": "true",
-              "max_results": "1000"
-          }
+          ## Build request and get initial response
+          all_responses = self.get_query_history_request(warehouse_ids = warehouse_ids_list, start_ts_ms = start_ts_ms, end_ts_ms = end_ts_ms, included_statuses = included_statuses)
 
-          ## Convert dict to json
-          v = json.dumps(request_string)
-          
-          uri = f"https://{workspace_url}/api/2.0/sql/history/queries"
-          headers_auth = {"Authorization":f"Bearer {self.dbx_token}"}
-          
-          #### Get Query History Results from API
-          endp_resp = requests.get(uri, data=v, headers=headers_auth).json()
-          
-          initial_resp = endp_resp.get("res")
-
-          #print(initial_resp)
-          
-          if initial_resp is None:
-              print(f"DBSQL Has no queries on the warehouses {', '.join(warehouse_ids_list)} for these times:{start_ts_ms} - {end_ts_ms}")
-              initial_resp = []
-              ## Continue anyways cause there could be old queries and we want to still compute aggregates
-          
-          
-          next_page = endp_resp.get("next_page_token")
-          has_next_page = endp_resp.get("has_next_page")
-
-          #print(has_next_page)
-
-          ## Page through results   
-          page_responses = []
-
-          while has_next_page is True: 
-
-              #print(f"Getting results for next page... {next_page}")
-
-              raw_page_request = {
-              "include_metrics": "true",
-              "max_results": 1000,
-              "page_token": next_page
-              }
-
-              json_page_request = json.dumps(raw_page_request)
-
-              ## This file could be large
-              current_page_resp = requests.get(uri,data=json_page_request, headers=headers_auth).json()
-              current_page_queries = current_page_resp.get("res")
-
-              ## Add Current results to total results or write somewhere (to s3?)
-
-              page_responses.append(current_page_queries)
-
-              ## Get next page
-              next_page = current_page_resp.get("next_page_token")
-              has_next_page = current_page_resp.get("has_next_page")
-
-              if has_next_page is False:
-                  break
-
-                  
-          ## Coaesce all responses   
-
-          all_responses = [x for xs in page_responses for x in xs] + initial_resp
           
           ## Start Profiling Process
           try: 

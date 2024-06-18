@@ -40,7 +40,9 @@ def send_alert(alerts_df, id):
   alert_count = alerts_df.count()
   print(f"Sending alerts for {alert_count}")
 
+  ### Uncomment after you have configured your webhook
   #send_webhook_alert(alerts_df)
+
   return
 
 # COMMAND ----------
