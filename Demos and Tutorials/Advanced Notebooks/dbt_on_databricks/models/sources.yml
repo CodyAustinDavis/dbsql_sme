@@ -1,0 +1,9 @@
+version: 1
+
+sources:
+  - name: dbt_optimized
+    catalog: main  
+    schema: dbt_optimized  
+    tables:
+      - name: silver_sensors_scd_1
+      - name: silver_users_scd_1

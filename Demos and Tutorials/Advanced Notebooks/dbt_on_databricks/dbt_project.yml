@@ -1,0 +1,30 @@
+# Name your project! Project names should contain only lowercase characters
+# and underscores. A good package name should reflect your organization's
+# name or the intended use of these models
+name: 'optimized_dbt'
+version: '1.0.0'
+config-version: 2
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'optimized_dbt'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:         # directories to be removed by `dbt clean`
+  - "target"
+  - "dbt_packages"
+
+models:
+  optimized_dbt:
+    +materialized: table
+    +tblproperties: {'delta.feature.allowColumnDefaults': 'supported', 'delta.columnMapping.mode' : 'name', 'delta.enableDeletionVectors': 'true'}
+
+# Optional for logging dbt run info to Delta tables
+# on-run-end: "{{ dbt_artifacts.upload_results(results) }}"
+      
+    
