@@ -13,14 +13,18 @@ import uuid
 1. Think about how to robustly drop/recreate tables from zombie sessions (maybe the session is no longer alive but it didnt get to drop its tables). Currently we fail the process, but we might want to add an option of allowing the new session to override it. -- I actually think I need to persisnt the table session data to a delta table to manage active sessions and clean up zombie sessions.
 
 2. Add ability to drop/re-create/override tables in different scopes. i.e. its ok to re-create/drop tables/schemas if they were created by the same user/codepath and only the session is different. 
+
+
+SCOPES: USER (lowest level), CODE_PATH_USER (medium level), SESSION (highest level of isolation)
 """
 
 class DeltaHelpers():
 
     
-    def __init__(self, catalog="delta_helpers", db_name="temp_db", **kwargs):
+    def __init__(self, catalog="delta_helpers", db_name="temp_db", scope = "SESSION", **kwargs):
         
         self.spark = SparkSession.getActiveSession()
+        self.scope_options = ["USER", "CODE_PATH_USER", "SESSION"]
         self.temp_db = db_name
         self.catalog = catalog
         self.catalog_temp = self.catalog + '_temp'
@@ -28,6 +32,12 @@ class DeltaHelpers():
         self.session_id = str(uuid.uuid4())
         ### Save list of tables that are being managed by this instance
         self.active_temp_tables = {self.session_id: []}
+
+        if scope not in self.scope_options:
+            raise(ValueError(f"ERROR: Isolation level not in options, select one of the following: {', '.join(self.scope_options)}"))
+        
+        ### Configurable level of isolation between sessions (most secure and default is session which unique per DeltaHelpers instance)
+        self.scope = scope
       
         #if self.spark.conf.get("spark.databricks.service.client.enabled") == "true":
         try:     
@@ -107,7 +117,7 @@ class DeltaHelpers():
         self.spark.sql(f"""USE CATALOG {self.catalog_temp}""")
         self.spark.sql(f"""USE DATABASE {self.temp_db}""")
 
-        print(f"Initializing temp_db for session id {self.session_id} under user {self.active_user} at {self.catalog_temp}.{self.temp_db}")
+        print(f"Initializing temp_db in scope: {self.scope} for session id {self.session_id} under user {self.active_user} at {self.catalog_temp}.{self.temp_db}")
 
         return
     
@@ -218,9 +228,56 @@ class DeltaHelpers():
 
                 elif table_session_id != self.session_id: 
 
-                    ### TO DO: optionally, we can add a flag to throw and error or just overwrite the table with a different session_id. I think it SHOULD error by default, because that will notify the user to use a different temp_db name/scope
-                    raise(RuntimeError(f"Table is created and managed by another session! Existing table session Id: {table_session_id}, user: {table_session_user}, code_path: {table_session_code_path} \n vs Current active session id: {self.session_id}, user: {self.active_user}, code_path: {self.source_code_path}"))
-                
+                    if self.scope == "SESSION":
+
+                        ### TO DO: optionally, we can add a flag to throw and error or just overwrite the table with a different session_id. I think it SHOULD error by default, because that will notify the user to use a different temp_db name/scope
+                        raise(RuntimeError(f"ERROR: Current scope: {self.scope}. \n Table is created and managed by another session, cannot overwrite table from another session with current scope! Existing table session Id: {table_session_id}, user: {table_session_user}, code_path: {table_session_code_path} \n vs Current active session id: {self.session_id}, user: {self.active_user}, code_path: {self.source_code_path}"))
+                    
+                    elif self.scope == "CODE_PATH_USER":
+
+                        ### If the session is different, but the session user and code path are the same, then it is ok to override table. But if new session, then overwrite because thats how temp dbs work
+                        if table_session_user == self.active_user and table_session_code_path == self.source_code_path:
+
+                            ### Have to override always because session is different
+                            df.write.format("delta").mode("overwrite").saveAsTable(full_table_name)
+
+                            ## Tag this table with the session info to ensure other entities do not delete it
+                            self.spark.sql(f"""ALTER TABLE {full_table_name} SET TAGS ('session_id' = '{self.session_id}', 'source_code_path'='{self.source_code_path}', 'session_user'='{self.active_user}')""")
+
+                            ## Save full name of table
+
+                            ### If different session, it will NOT be in the session metadata
+
+                            full_table_dict = {"catalog": self.catalog_temp, "database": self.temp_db, "table_name": table_name, "full_table_name": full_table_name, 'session_id': self.session_id, 'code_path': self.source_code_path, 'session_user': self.active_user}
+                    
+                            self.active_temp_tables[self.session_id].append(full_table_dict)
+
+                        else:
+                            raise(RuntimeError(f"ERROR: Current scope: {self.scope}. \n Table is created and managed by another session and has different codepath or user, cannot alter existing temp table! Existing table session Id: {table_session_id}, user: {table_session_user}, code_path: {table_session_code_path} \n vs Current active session id: {self.session_id}, user: {self.active_user}, code_path: {self.source_code_path}"))
+                        
+                        
+                    elif self.scope == "USER":
+
+                        ### If the session is different, but the session user and code path are the same, then it is ok to override table. But if new session, then overwrite because thats how temp dbs work
+                        if table_session_user == self.active_user:
+
+                            ### Have to override always because session is different
+                            df.write.format("delta").mode("overwrite").saveAsTable(full_table_name)
+
+                            ## Tag this table with the session info to ensure other entities do not delete it
+                            self.spark.sql(f"""ALTER TABLE {full_table_name} SET TAGS ('session_id' = '{self.session_id}', 'source_code_path'='{self.source_code_path}', 'session_user'='{self.session_user}')""")
+
+                            ## Save full name of table
+                            full_table_dict = {"catalog": self.catalog_temp, "database": self.temp_db, "table_name": table_name, "full_table_name": full_table_name, 'session_id': self.session_id, 'code_path': self.source_code_path, 'session_user': self.active_user}
+
+                            ## Save full name of table
+                            self.active_temp_tables[self.session_id].append(full_table_dict)
+
+                        else:
+                            raise(RuntimeError(f"ERROR: Current scope: {self.scope}. \n Table is created and managed by another session and has different user, cannot alter existing temp table! Existing table session Id: {table_session_id}, user: {table_session_user}, code_path: {table_session_code_path} \n vs Current active session id: {self.session_id}, user: {self.active_user}, code_path: {self.source_code_path}"))
+
+
+                ## If within the same session, its all chill                
                 elif table_session_id == self.session_id:
 
                     ### If table exists and its the same session, you can respect the write mode
@@ -312,11 +369,21 @@ class DeltaHelpers():
         return
     
     ## This method drops the temp db if it exists for your catalog/db combo. If force_drop = True, then it will drop the database no matter who created it. If False, then it will ONLY drop the database if it was created by the active session Id. 
+
+    ### Force still does not override the scope level. Force=True will only drop the level of scope it can drop
     def dropTempDb(self, force=False):
 
         schema_session_id = self.spark.sql(f"""
                             SELECT tag_value FROM system.information_schema.schema_tags 
                             WHERE catalog_name = '{self.catalog_temp}' AND schema_name = '{self.temp_db}' AND tag_name = 'session_id'""").collect()[0][0]
+        
+        schema_session_user = self.spark.sql(f"""
+                            SELECT tag_value FROM system.information_schema.schema_tags 
+                            WHERE catalog_name = '{self.catalog_temp}' AND schema_name = '{self.temp_db}' AND tag_name = 'session_user'""").collect()[0][0]
+        
+        schema_source_code_path = self.spark.sql(f"""
+                            SELECT tag_value FROM system.information_schema.schema_tags 
+                            WHERE catalog_name = '{self.catalog_temp}' AND schema_name = '{self.temp_db}' AND tag_name = 'source_code_path'""").collect()[0][0]
         
         ## If database was created by same session, its ok to drop
         if schema_session_id is None:
@@ -326,10 +393,31 @@ class DeltaHelpers():
                         self.spark.sql(f"DROP DATABASE IF EXISTS {self.catalog_temp}.{self.temp_db} CASCADE")
 
         elif schema_session_id != self.session_id:
+
+            ### Check scope
             if force:
-                self.spark.sql(f"DROP DATABASE IF EXISTS {self.catalog_temp}.{self.temp_db} CASCADE")
+
+                if self.scope == "SESSION":
+                    if self.session_id == schema_session_id:
+                        self.spark.sql(f"DROP DATABASE IF EXISTS {self.catalog_temp}.{self.temp_db} CASCADE")
+                    else: 
+                        raise(RuntimeError(f"ERROR: Current scope: {self.scope}. Trying to delete a temp db that was created by another session!"))
+                    
+                elif self.scope == "CODE_PATH_USER":
+                    if schema_session_user == self.active_user and schema_source_code_path == self.source_code_path:
+                        self.spark.sql(f"DROP DATABASE IF EXISTS {self.catalog_temp}.{self.temp_db} CASCADE")
+                    else: 
+                        raise(RuntimeError(f"ERROR: Current scope: {self.scope}. Trying to delete a temp db that was created by another session and different source code or user!"))
+                
+                elif self.scope == "USER":
+                    if schema_session_user == self.active_user:
+                        self.spark.sql(f"DROP DATABASE IF EXISTS {self.catalog_temp}.{self.temp_db} CASCADE")
+                    else: 
+                        raise(RuntimeError(f"ERROR: Current scope: {self.scope}. Trying to delete a temp db that was created by another session and different user!"))                 
+
+
             else:
-                raise(RuntimeError("ERROR: Trying to delete a temp db that was created by another session!"))
+                raise(RuntimeError(f"ERROR: Current scope: {self.scope}. Force is OFF. Trying to delete a temp db that was created by another session!"))
             
         else:
             pass
