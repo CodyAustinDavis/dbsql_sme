@@ -124,13 +124,24 @@ class DeltaHelpers():
     def getAllSessionInformation(self):
         return self.session_info
     
-    def getSessionTable(self, table_name):
+
+    def getSessionTableDf(self, table_name):
         ### Get the table as long as it is in the session
-        session_table_name = None
+        session_table_info = None
 
-        session_table_name = [i for i in self.active_temp_tables.get(self.session_id) if i.get('table_name') == table_name][0]
+        session_table_info = [i for i in self.active_temp_tables.get(self.session_id) if i.get('table_name') == table_name][0]
 
-        return session_table_name
+        session_temp_df = self.spark.table(session_table_info.get('full_table_name'))
+        return session_temp_df
+    
+    def getSessionTableInfo(self, table_name):
+        ### Get the table as long as it is in the session
+        session_table_info = None
+
+        session_table_info = [i for i in self.active_temp_tables.get(self.session_id) if i.get('table_name') == table_name][0]
+
+        return session_table_info
+    
     
     def getAllSessionTableInformation(self):
         return self.active_temp_tables.get(self.session_id)
