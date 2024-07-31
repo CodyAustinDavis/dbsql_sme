@@ -55,9 +55,9 @@ from helperfunctions.deltahelpers import DeltaHelpers, DeltaMergeHelpers ## For 
 # COMMAND ----------
 
 # DBTITLE 1,Step 0:  Initialize Logger and Serverless Client
-WAREHOUSE_ID = "475b94ddc7cd5211"
-HOST_NAME = "e2-demo-field-eng.cloud.databricks.com"
-#TOKEN = <token>
+WAREHOUSE_ID = "<warehouse_id>"
+HOST_NAME = "<host>"
+TOKEN = "<token>"
 LOGGER_TABLE = 'main.iot_dashboard.logger'
 PIPELINE_PROCESS_NAME = 'iot_dashboard_scd2_end_to_end'
 
