@@ -1,4 +1,5 @@
 
+--DROP SCHEMA IF EXISTS main.dbsql_warehouse_advisor CASCADE;
 CREATE SCHEMA IF NOT EXISTS main.dbsql_warehouse_advisor;
 USE CATALOG main;
 USE SCHEMA dbsql_warehouse_advisor;
@@ -36,6 +37,7 @@ start_time,
 end_time,
 update_time,
 COALESCE(read_bytes, 0) AS read_bytes,
+COALESCE(written_bytes, 0) AS written_bytes, -- New!
 COALESCE(read_io_cache_percent, 0) AS read_io_cache_percent,
 from_result_cache,
 COALESCE(spilled_local_bytes, 0) AS spilled_local_bytes,
@@ -65,7 +67,17 @@ r'/\*.*?QUERY_TAG:(.*?)(?=\*/)',
 ), 
 'QUERY_TAG:',
 ''
-) AS raw_tagged
+) AS raw_tagged,
+substr(statement_text, INSTR(statement_text, '/*') + 2, INSTR(statement_text, '*/') - INSTR(statement_text, '/*') - 2) AS dbt_metadata_json,
+-- Optional DBT Metadata
+COALESCE(dbt_metadata_json:app, 'None') AS dbt_app,
+COALESCE(dbt_metadata_json:node_id, 'None') AS dbt_node_id,
+COALESCE(dbt_metadata_json:profile_name, 'None') AS dbt_profile_name,
+COALESCE(dbt_metadata_json:target_name, 'None') AS dbt_target_name,
+COALESCE(dbt_metadata_json:dbt_version, 'None') AS dbt_version,
+COALESCE(dbt_metadata_json:dbt_databricks_version, 'None') AS dbt_databricks_version,
+from_json(dbt_metadata_json, 'map<string,string>') AS parsed_dbt_comment,
+CASE WHEN (lower(dbt_metadata_json:app) = "dbt" OR client_application LIKE ('%dbt%')) THEN 'DBT Query' ELSE 'Other Query Type' END AS IsDBTQuery
 FROM system.query.history
 WHERE compute.warehouse_id IS NOT NULL -- Only SQL Warehouse Compute
 AND statement_type IS NOT NULL
@@ -220,6 +232,3 @@ FROM active_warehouses AS aw
 
 SELECT * FROM with_delete_flag
 );
-
-
-
