@@ -73,7 +73,11 @@ SELECT grantor, grantee,
     CONCAT(table_catalog, '.', table_schema, '.', table_name) AS entity_name, 
     'table' AS entity_type, 
     privilege_type, is_grantable, inherited_from, 
-CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege 
+CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege,
+CASE WHEN privilege_type IN ('ALL_PRIVILEGES', 'MODIFY', 'APPLY_TAG')
+        THEN 'EDIT_ACCESS'
+        ELSE 'READ_ONLY'
+        END AS privilege_level
 FROM system.information_schema.table_privileges
  UNION ALL 
 
@@ -84,7 +88,11 @@ SELECT grantor, grantee,
     CONCAT(catalog_name, '.', schema_name) AS entity_name, 
     'schema' AS entity_type, 
     privilege_type, is_grantable, inherited_from, 
-CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege 
+CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege ,
+CASE WHEN privilege_type IN ('ALL_PRIVILEGES', 'MODIFY', 'APPLY_TAG', 'CREATE_MODEL', 'CREATE_MATERIALIZED_VIEW', 'REFRESH', 'APPLY_TAG', 'CREATE_FUNCTION', 'CREATE_VOLUME', 'WRITE_VOLUME', 'CREATE_TABLE', 'CREATE_VIEW', 'MODIFY')
+        THEN 'EDIT_ACCESS'
+        WHEN privilege_type IN ('SELECT', 'USE_SCHEMA', 'READ_VOLUME', 'EXECUTE') THEN 'READ_ONLY'
+        END AS privilege_level
 FROM system.information_schema.schema_privileges
 
 UNION ALL
@@ -96,8 +104,13 @@ SELECT grantor, grantee,
     CONCAT(catalog_name) AS entity_name, 
     'catalog' AS entity_type, 
     privilege_type, is_grantable, inherited_from, 
-CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege 
-FROM system.information_schema.schema_privileges
+CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege,
+
+CASE WHEN privilege_type IN ('CREATE_SCHEMA', 'ALL_PRIVILEGES', 'MODIFY', 'APPLY_TAG', 'CREATE_MODEL', 'CREATE_MATERIALIZED_VIEW', 'REFRESH', 'APPLY_TAG', 'CREATE_FUNCTION', 'CREATE_VOLUME', 'WRITE_VOLUME', 'CREATE_TABLE', 'CREATE_VIEW', 'MODIFY')
+        THEN 'EDIT_ACCESS'
+        WHEN privilege_type IN ('BROWSE', 'USE_CATALOG', 'SELECT', 'USE_SCHEMA', 'READ_VOLUME', 'EXECUTE') THEN 'READ_ONLY'
+        END AS privilege_level
+FROM system.information_schema.catalog_privileges
 
 UNION ALL
 
@@ -108,7 +121,11 @@ SELECT grantor, grantee,
     CONCAT(volume_catalog, '.', volume_schema, '.', volume_name) AS entity_name, 
     'volume' AS entity_type, 
     privilege_type, is_grantable, inherited_from, 
-CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege 
+CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege ,
+CASE WHEN privilege_type IN ('ALL_PRIVILEGES','WRITE_VOLUME','APPLY_TAG')
+        THEN 'EDIT_ACCESS'
+        WHEN privilege_type IN ('READ_VOLUME') THEN 'READ_ONLY'
+        END AS privilege_level
 FROM system.information_schema.volume_privileges
 
 UNION ALL
@@ -120,7 +137,11 @@ SELECT grantor, grantee,
     CONCAT(storage_credential_name) AS entity_name, 
     'storage credential' AS entity_type, 
     privilege_type, is_grantable, inherited_from, 
-CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege 
+CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege,
+CASE WHEN privilege_type IN ('ALL_PRIVILEGES','CREATE_EXTERNAL_LOCATION','WRITE_FILES', 'CREATE_EXTERNAL_TABLE')
+        THEN 'EDIT_ACCESS'
+        WHEN privilege_type IN ('READ_FILES') THEN 'READ_ONLY'
+        END AS privilege_level
 FROM system.information_schema.storage_credential_privileges
 
 UNION ALL
@@ -132,7 +153,11 @@ SELECT grantor, grantee,
     CONCAT(external_location_name) AS entity_name, 
     'external location' AS entity_type, 
     privilege_type, is_grantable, inherited_from, 
-CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege 
+CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege ,
+CASE WHEN privilege_type IN ('ALL_PRIVILEGES','CREATE_EXTERNAL_VOLUME', 'CREATE_FOREIGN_CATALOG', 'CREATE_MANAGED_STORAGE','WRITE_FILES', 'CREATE_EXTERNAL_TABLE')
+        THEN 'EDIT_ACCESS'
+        WHEN privilege_type IN ('BROWSE', 'READ_FILES') THEN 'READ_ONLY'
+        END AS privilege_level
 FROM system.information_schema.external_location_privileges
 
 UNION ALL
@@ -144,11 +169,16 @@ SELECT grantor, grantee,
     CONCAT(metastore_id) AS entity_name, 
     'metastore' AS entity_type, 
     privilege_type, is_grantable, inherited_from, 
-CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege 
+CASE wHEN inherited_from = 'NONE' THEN 'Direct Privlege' ELSE 'Inherited' END AS IsDirectPrivilege ,
+    CASE 
+        WHEN privilege_type LIKE 'CREATE%' OR privilege_type LIKE 'MANAGE%' THEN 'EDIT_ACCESS'
+        WHEN privilege_type IN ('MANAGE_ALLOWLIST', 'CREATE_EXTERNAL_LOCATION', 'SET_SHARE_PERMISSION') THEN 'EDIT_ACCESS'
+        WHEN privilege_type LIKE ('USE%') THEN 'READ_ONLY'
+    END AS privilege_level
 FROM system.information_schema.metastore_privileges
 
           )
-          CLUSTER BY (grantee, entity_name)
+          CLUSTER BY (privilege_level, entity_type, grantee, entity_name)
           """)
 
 spark.sql(f"OPTIMIZE {target_catalog}.{target_schema}.all_privileges_snapshot")
