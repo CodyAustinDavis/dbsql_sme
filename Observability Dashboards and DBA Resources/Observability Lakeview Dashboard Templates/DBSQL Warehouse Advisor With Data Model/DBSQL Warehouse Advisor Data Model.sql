@@ -59,6 +59,19 @@ SELECT
     END AS ReadDataAmountInGB,
 
     CASE 
+        WHEN written_bytes > 0 
+        THEN CAST(read_bytes AS FLOAT) / (1024 * 1024 * 1024) 
+        ELSE 0 
+    END AS WrittenDataAmountInGB,
+
+    CASE 
+        WHEN spilled_local_bytes > 0 
+        THEN CAST(read_bytes AS FLOAT) / (1024 * 1024 * 1024) 
+        ELSE 0 
+    END AS SpilledDataAmountInGB,
+
+
+    CASE 
         WHEN read_io_cache_percent > 0 THEN 'Used Cache' 
         ELSE 'No Cache' 
     END AS UsedCacheFlag,
@@ -123,6 +136,8 @@ FROM system.query.history
 WHERE compute.warehouse_id IS NOT NULL -- Only SQL Warehouse Compute
 AND statement_type IS NOT NULL
 );
+
+
 
 
 -- Warehouse Usage
