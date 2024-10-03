@@ -3,7 +3,7 @@ CREATE SCHEMA IF NOT EXISTS main.dbsql_warehouse_advisor;
 USE CATALOG main;
 USE SCHEMA dbsql_warehouse_advisor;
 
-
+--DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_query_history;
 CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_query_history
 COMMENT 'SQL Warehouse Query History with cleaned up exeuction metrics and query tags'
 SCHEDULE CRON '0 0 0 * * ? *'
@@ -24,7 +24,7 @@ SELECT
     COALESCE(CAST(total_task_duration_ms AS FLOAT) / 1000, 0) AS CPUTotalExecutionTime,
     COALESCE(CAST(execution_duration_ms AS FLOAT) / 1000, 0) AS ExecutionQueryTime, -- Included in Cost Per Query
     COALESCE(CAST(compilation_duration_ms AS FLOAT) / 1000, 0) AS CompilationQueryTime, -- Included in Cost Per Query
-    COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000, 0) AS QueueQueryTime,
+    COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT) / 1000, 0) + COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000, 0) AS QueueQueryTime,
     COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT) / 1000, 0) AS StartUpQueryTime,
     COALESCE(CAST(result_fetch_duration_ms AS FLOAT) / 1000, 0) AS ResultFetchTime,
     
@@ -45,8 +45,7 @@ SELECT
     COALESCE(spilled_local_bytes, 0) AS spilled_local_bytes,
     
     COALESCE(CAST(total_task_duration_ms AS FLOAT) / NULLIF(total_duration_ms, 0), NULL) AS TotalCPUTime_To_Execution_Time_Ratio, 
-    COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / NULLIF(total_duration_ms, 0), 0) AS ProportionQueueTime,
-    
+    (COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT), 0) + COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT), 0)) / NULLIF(total_duration_ms, 0) AS ProportionQueueTime,
     AVG(CAST(total_duration_ms AS FLOAT) / 1000) OVER () AS WarehouseAvgQueryRuntime,
     AVG(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000) OVER () AS WarehouseAvgQueueTime,
     AVG(COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000 / NULLIF(CAST(total_duration_ms AS FLOAT) / 1000, 0), 0)) OVER () AS WarehouseAvgProportionTimeQueueing,
@@ -141,6 +140,9 @@ AND statement_type IS NOT NULL
 
 
 -- Warehouse Usage
+
+--DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_usage;
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_usage
 COMMENT 'SQL Warehouse Usage'
 SCHEDULE CRON '0 0 0 * * ? *'
@@ -154,6 +156,8 @@ WHERE usage_metadata.warehouse_id IS NOT NULL;
 
 
 -- Warehouse Scaling History
+--DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_scaling_events;
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_scaling_events
 COMMENT 'SQL Warehouse Scaling Events from warehouse_events table'
 SCHEDULE CRON '0 0 0 * * ? *'
@@ -164,6 +168,7 @@ SELECT * FROM system.compute.warehouse_events;
 
 -- Warehouse SCD History
 -- Audit logs warehouse SCD history table (for names and other warehouse metadata such as sizing, owner, etc. )
+--DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_scd;
 CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_scd
 COMMENT 'SQL Warehouse SCD Change History'
 SCHEDULE CRON '0 0 0 * * ? *'
@@ -260,7 +265,6 @@ FROM edit_history
 
 
 --DROP MATERIALIZED VIEW  main.dbsql_warehouse_advisor.warehouse_current;
-
 CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_current
 COMMENT 'SQL Warehouse Current Definition - including deleted flag'
 SCHEDULE CRON '0 0 0 * * ? *'
