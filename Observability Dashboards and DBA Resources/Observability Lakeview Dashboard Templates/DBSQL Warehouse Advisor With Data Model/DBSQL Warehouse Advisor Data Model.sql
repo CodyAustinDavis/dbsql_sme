@@ -51,6 +51,13 @@ SELECT
     AVG(COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000 / NULLIF(CAST(total_duration_ms AS FLOAT) / 1000, 0), 0)) OVER () AS WarehouseAvgProportionTimeQueueing,
     
     -- Can use this to chargeback
+
+    read_files AS FilesRead,
+    pruned_files AS FilesPruned,
+    CASE WHEN read_files > 0 OR pruned_files > 0
+        THEN CAST(pruned_files AS FLOAT) / (CAST(read_files AS FLOAT) + CAST(pruned_files AS FLOAT))
+    END AS FilesPrunedProportion,
+
     CASE 
         WHEN read_bytes > 0 
         THEN CAST(read_bytes AS FLOAT) / (1024 * 1024 * 1024) 
@@ -129,7 +136,20 @@ SELECT
         WHEN (LOWER(dbt_metadata_json:app) = 'dbt' OR client_application LIKE '%dbt%') 
         THEN 'DBT Query' 
         ELSE 'Other Query Type' 
-    END AS IsDBTQuery
+    END AS IsDBTQuery,
+
+-- NEW - Query source
+    CASE WHEN query_source.job_info.job_id IS NOT NULL THEN 'JOB'
+    WHEN query_source.legacy_dashboard_id IS NOT NULL THEN 'LEGACY DASHBOARD'
+    WHEN query_source.dashboard_id IS NOT NULL THEN 'AI/BI DASHBOARD'
+    WHEN query_source.alert_id IS NOT NULL THEN 'ALERT'
+    WHEN query_source.notebook_id IS NOT NULL THEN 'NOTEBOOK'
+    WHEN query_source.sql_query_id IS NOT NULL THEN 'SQL QUERY'
+    WHEN query_source.genie_space_id IS NOT NULL THEN 'GENIE SPACE'
+    ELSE 'UNKNOWN'
+    END AS query_source_type,
+coalesce(query_source.job_info.job_id, query_source.legacy_dashboard_id, query_source.dashboard_id, query_source.alert_id, query_source.notebook_id, query_source.sql_query_id, query_source.genie_space_id, 'UNKNOWN') AS query_source_id
+
 
 FROM system.query.history
 WHERE compute.warehouse_id IS NOT NULL -- Only SQL Warehouse Compute
