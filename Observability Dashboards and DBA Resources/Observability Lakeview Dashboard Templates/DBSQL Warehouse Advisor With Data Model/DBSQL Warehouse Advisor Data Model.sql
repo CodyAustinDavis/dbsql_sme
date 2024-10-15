@@ -3,6 +3,8 @@ CREATE SCHEMA IF NOT EXISTS main.dbsql_warehouse_advisor;
 USE CATALOG main;
 USE SCHEMA dbsql_warehouse_advisor;
 
+
+
 --DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_query_history;
 CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_query_history
 COMMENT 'SQL Warehouse Query History with cleaned up exeuction metrics and query tags'
@@ -32,7 +34,7 @@ SELECT
     CASE 
         WHEN COALESCE(CAST(total_task_duration_ms AS FLOAT) / 1000, 0) = 0 
         THEN 0 
-        ELSE COALESCE(CAST(total_duration_ms AS FLOAT) / 1000, 0) + COALESCE(CAST(compilation_duration_ms AS FLOAT) / 1000, 0) 
+        ELSE COALESCE(CAST(execution_duration_ms AS FLOAT) / 1000, 0) + COALESCE(CAST(compilation_duration_ms AS FLOAT) / 1000, 0) 
     END AS TotalResourceTimeUsedForAllocation,
 
     start_time,
