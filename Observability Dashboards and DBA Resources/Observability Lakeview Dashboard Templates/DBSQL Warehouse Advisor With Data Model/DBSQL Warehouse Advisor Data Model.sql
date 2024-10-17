@@ -125,6 +125,10 @@ SELECT
            INSTR(statement_text, '/*') + 2, 
            INSTR(statement_text, '*/') - INSTR(statement_text, '/*') - 2) AS dbt_metadata_json,
 
+    -- Error Messages
+    error_message,
+    COALESCE(REGEXP_EXTRACT(error_message, '\\[(.*?)\\]', 1), 'NO ERROR') AS error_type,
+
     -- Optional DBT Metadata
     COALESCE(dbt_metadata_json:app, 'None') AS dbt_app,
     COALESCE(dbt_metadata_json:node_id, 'None') AS dbt_node_id,
