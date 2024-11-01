@@ -35,6 +35,12 @@ SELECT
         ELSE COALESCE(CAST(execution_duration_ms AS FLOAT) / 1000, 0) + COALESCE(CAST(compilation_duration_ms AS FLOAT) / 1000, 0) 
     END AS TotalResourceTimeUsedForAllocation,
 
+    --- Query Work that is NOT dollar based allocation
+        COALESCE(COALESCE(CAST(compilation_duration_ms AS FLOAT) / 1000, 0)
+            + COALESCE(CAST(total_task_duration_ms AS FLOAT) / 1000, 0)
+            + COALESCE(CAST(result_fetch_duration_ms AS FLOAT) / 1000, 0)
+        ) AS QueryWork,
+        
     start_time,
     end_time,
     update_time,
