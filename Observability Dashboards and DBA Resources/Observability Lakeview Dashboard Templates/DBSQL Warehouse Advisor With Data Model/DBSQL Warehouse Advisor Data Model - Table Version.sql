@@ -52,6 +52,7 @@ SELECT
     
     COALESCE(CAST(total_task_duration_ms AS FLOAT) / NULLIF(total_duration_ms, 0), NULL) AS TotalCPUTime_To_Execution_Time_Ratio, 
     (COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT), 0) + COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT), 0)) / NULLIF(total_duration_ms, 0) AS ProportionQueueTime,
+    (COALESCE(CAST(result_fetch_duration_ms AS FLOAT), 0) / NULLIF(total_duration_ms, 0)) AS ProportionResultFetchTime,
     AVG(CAST(total_duration_ms AS FLOAT) / 1000) OVER () AS WarehouseAvgQueryRuntime,
     AVG(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000) OVER () AS WarehouseAvgQueueTime,
     AVG(COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000 / NULLIF(CAST(total_duration_ms AS FLOAT) / 1000, 0), 0)) OVER () AS WarehouseAvgProportionTimeQueueing,

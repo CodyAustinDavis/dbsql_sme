@@ -5,7 +5,7 @@ USE SCHEMA dbsql_warehouse_advisor;
 
 
 
---DROP MATERIALIZED VIEW EXISTS main.dbsql_warehouse_advisor.warehouse_query_history;
+DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_query_history;
 CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_query_history
 COMMENT 'SQL Warehouse Query History with cleaned up exeuction metrics and query tags'
 SCHEDULE CRON '0 0 0 * * ? *'
@@ -52,6 +52,7 @@ SELECT
     
     COALESCE(CAST(total_task_duration_ms AS FLOAT) / NULLIF(total_duration_ms, 0), NULL) AS TotalCPUTime_To_Execution_Time_Ratio, 
     (COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT), 0) + COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT), 0)) / NULLIF(total_duration_ms, 0) AS ProportionQueueTime,
+    (COALESCE(CAST(result_fetch_duration_ms AS FLOAT), 0) / NULLIF(total_duration_ms, 0)) AS ProportionResultFetchTime,
     AVG(CAST(total_duration_ms AS FLOAT) / 1000) OVER () AS WarehouseAvgQueryRuntime,
     AVG(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000) OVER () AS WarehouseAvgQueueTime,
     AVG(COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000 / NULLIF(CAST(total_duration_ms AS FLOAT) / 1000, 0), 0)) OVER () AS WarehouseAvgProportionTimeQueueing,
@@ -159,8 +160,6 @@ SELECT
     ELSE 'UNKNOWN'
     END AS query_source_type,
 coalesce(query_source.job_info.job_id, query_source.legacy_dashboard_id, query_source.dashboard_id, query_source.alert_id, query_source.notebook_id, query_source.sql_query_id, query_source.genie_space_id, 'UNKNOWN') AS query_source_id
-
-
 FROM system.query.history
 WHERE compute.warehouse_id IS NOT NULL -- Only SQL Warehouse Compute
 AND statement_type IS NOT NULL
