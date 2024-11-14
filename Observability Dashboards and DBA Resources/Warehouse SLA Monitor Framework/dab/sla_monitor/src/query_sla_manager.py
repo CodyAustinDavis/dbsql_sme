@@ -1,3 +1,5 @@
+# Databricks notebook source
+
 from pyspark.sql import SparkSession
 from datetime import time, date, timedelta, timezone, datetime
 from typing import List
@@ -9,6 +11,7 @@ import hashlib
 import pandas as pd
 import time
 
+# COMMAND ----------
 
 class QueryHistoryAlertManager():
 
@@ -684,3 +687,5 @@ class QueryHistoryAlertManager():
           if self.num_cumulative_errors >= self.hard_fail_after_n_attempts:
             raise(e)
             break
+
+# COMMAND ----------
