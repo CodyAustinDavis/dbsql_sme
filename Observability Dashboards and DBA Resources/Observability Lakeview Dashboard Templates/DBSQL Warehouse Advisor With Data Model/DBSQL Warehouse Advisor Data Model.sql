@@ -5,7 +5,7 @@ USE SCHEMA dbsql_warehouse_advisor;
 
 
 
-DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_query_history;
+--DROP TABLE IF EXISTS main.dbsql_warehouse_advisor.warehouse_query_history;
 CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_query_history
 COMMENT 'SQL Warehouse Query History with cleaned up exeuction metrics and query tags'
 SCHEDULE CRON '0 0 0 * * ? *'
@@ -29,18 +29,21 @@ SELECT
     COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT) / 1000, 0) + COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000, 0) AS QueueQueryTime,
     COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT) / 1000, 0) AS StartUpQueryTime,
     COALESCE(CAST(result_fetch_duration_ms AS FLOAT) / 1000, 0) AS ResultFetchTime,
-    
-    -- Metric for query cost allocation - exclude metadata operations
-    CASE 
-        WHEN COALESCE(CAST(total_task_duration_ms AS FLOAT) / 1000, 0) = 0 
-        THEN 0 
-        ELSE COALESCE(CAST(execution_duration_ms AS FLOAT) / 1000, 0) + COALESCE(CAST(compilation_duration_ms AS FLOAT) / 1000, 0) 
-    END AS TotalResourceTimeUsedForAllocation,
     --- Query Work that is NOT dollar based allocation
         COALESCE(COALESCE(CAST(compilation_duration_ms AS FLOAT) / 1000, 0)
             + COALESCE(CAST(total_task_duration_ms AS FLOAT) / 1000, 0)
             + COALESCE(CAST(result_fetch_duration_ms AS FLOAT) / 1000, 0)
         ) AS QueryWork,
+
+    -- Metric for query cost allocation - exclude metadata operations
+    CASE 
+        WHEN COALESCE(CAST(total_task_duration_ms AS FLOAT) / 1000, 0) = 0 
+        THEN 0 
+        ELSE QueryWork
+    END AS TotalResourceTimeUsedForAllocation,
+
+    -- Metric for query cost allocation - include metadata operations
+    QueryWork AS TotalResourceTimeUsedForAllocationWithMetadata,
     start_time,
     end_time,
     update_time,
