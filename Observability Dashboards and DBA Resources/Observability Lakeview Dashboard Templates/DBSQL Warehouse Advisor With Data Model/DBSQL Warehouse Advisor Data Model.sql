@@ -1,15 +1,14 @@
 DROP SCHEMA IF EXISTS main.dbsql_warehouse_advisor CASCADE;
 CREATE SCHEMA IF NOT EXISTS main.dbsql_warehouse_advisor;
+  -- LOCATION 's3://<location>/'; -- Optional location parameter
 USE CATALOG main;
 USE SCHEMA dbsql_warehouse_advisor;
 
 
-
---DROP TABLE IF EXISTS main.dbsql_warehouse_advisor.warehouse_query_history;
-CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_query_history
+CREATE OR REFRESH STREAMING TABLE main.dbsql_warehouse_advisor.warehouse_query_history
+SCHEDULE CRON '0 0 * * * ? *' -- hourly
+CLUSTER BY (workspace_id, warehouse_id, start_time)
 COMMENT 'SQL Warehouse Query History with cleaned up exeuction metrics and query tags'
-SCHEDULE CRON '0 0 0 * * ? *'
-TBLPROPERTIES ('pipelines.autoOptimize.zOrderCols'= 'warehouse_id,start_time')
 AS 
 (
 SELECT
@@ -29,19 +28,18 @@ SELECT
     COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT) / 1000, 0) + COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000, 0) AS QueueQueryTime,
     COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT) / 1000, 0) AS StartUpQueryTime,
     COALESCE(CAST(result_fetch_duration_ms AS FLOAT) / 1000, 0) AS ResultFetchTime,
+
     --- Query Work that is NOT dollar based allocation
         COALESCE(COALESCE(CAST(compilation_duration_ms AS FLOAT) / 1000, 0)
             + COALESCE(CAST(total_task_duration_ms AS FLOAT) / 1000, 0)
             + COALESCE(CAST(result_fetch_duration_ms AS FLOAT) / 1000, 0)
         ) AS QueryWork,
-
     -- Metric for query cost allocation - exclude metadata operations
     CASE 
         WHEN COALESCE(CAST(total_task_duration_ms AS FLOAT) / 1000, 0) = 0 
         THEN 0 
         ELSE QueryWork
     END AS TotalResourceTimeUsedForAllocation,
-
     -- Metric for query cost allocation - include metadata operations
     QueryWork AS TotalResourceTimeUsedForAllocationWithMetadata,
     start_time,
@@ -56,12 +54,7 @@ SELECT
     COALESCE(CAST(total_task_duration_ms AS FLOAT) / NULLIF(total_duration_ms, 0), NULL) AS TotalCPUTime_To_Execution_Time_Ratio, 
     (COALESCE(CAST(waiting_for_compute_duration_ms AS FLOAT), 0) + COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT), 0)) / NULLIF(total_duration_ms, 0) AS ProportionQueueTime,
     (COALESCE(CAST(result_fetch_duration_ms AS FLOAT), 0) / NULLIF(total_duration_ms, 0)) AS ProportionResultFetchTime,
-    AVG(CAST(total_duration_ms AS FLOAT) / 1000) OVER () AS WarehouseAvgQueryRuntime,
-    AVG(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000) OVER () AS WarehouseAvgQueueTime,
-    AVG(COALESCE(CAST(waiting_at_capacity_duration_ms AS FLOAT) / 1000 / NULLIF(CAST(total_duration_ms AS FLOAT) / 1000, 0), 0)) OVER () AS WarehouseAvgProportionTimeQueueing,
-    
     -- Can use this to chargeback
-
     read_files AS FilesRead,
     pruned_files AS FilesPruned,
     CASE WHEN read_files > 0 OR pruned_files > 0
@@ -163,50 +156,42 @@ SELECT
     ELSE 'UNKNOWN'
     END AS query_source_type,
 coalesce(query_source.job_info.job_id, query_source.legacy_dashboard_id, query_source.dashboard_id, query_source.alert_id, query_source.notebook_id, query_source.sql_query_id, query_source.genie_space_id, 'UNKNOWN') AS query_source_id
-FROM system.query.history
+
+
+FROM STREAM(system.query.history)
 WHERE compute.warehouse_id IS NOT NULL -- Only SQL Warehouse Compute
 AND statement_type IS NOT NULL
 );
 
-
-
-
 -- Warehouse Usage
 
---DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_usage;
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_usage
+CREATE OR REFRESH STREAMING TABLE main.dbsql_warehouse_advisor.warehouse_usage
+SCHEDULE CRON '0 0 * * * ? *' -- hourly
+CLUSTER BY (workspace_id, warehouse_id,usage_start_time)
 COMMENT 'SQL Warehouse Usage'
-SCHEDULE CRON '0 0 0 * * ? *'
-TBLPROPERTIES ('pipelines.autoOptimize.zOrderCols'= 'warehouse_id,usage_start_time')
 AS 
 SELECT 
 usage_metadata.warehouse_id AS warehouse_id,
 *
-FROM system.billing.usage
+FROM STREAM(system.billing.usage)
 WHERE usage_metadata.warehouse_id IS NOT NULL;
 
 
 -- Warehouse Scaling History
---DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_scaling_events;
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_scaling_events
+CREATE OR REFRESH STREAMING TABLE main.dbsql_warehouse_advisor.warehouse_scaling_events
+SCHEDULE CRON '0 0 * * * ? *' -- hourly
+CLUSTER BY (warehouse_id,event_time)
 COMMENT 'SQL Warehouse Scaling Events from warehouse_events table'
-SCHEDULE CRON '0 0 0 * * ? *'
-TBLPROPERTIES ('pipelines.autoOptimize.zOrderCols'= 'warehouse_id,event_time')
 AS
-SELECT * FROM system.compute.warehouse_events;
+SELECT * FROM STREAM(system.compute.warehouse_events);
 
 
 -- Warehouse SCD History
 -- Audit logs warehouse SCD history table (for names and other warehouse metadata such as sizing, owner, etc. )
---DROP MATERIALIZED VIEW IF EXISTS main.dbsql_warehouse_advisor.warehouse_scd;
-CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_scd
-COMMENT 'SQL Warehouse SCD Change History'
-SCHEDULE CRON '0 0 0 * * ? *'
-TBLPROPERTIES ('pipelines.autoOptimize.zOrderCols'= 'event_time,warehouse_id')
-AS (
-WITH warehouse_raw_events AS (
+CREATE OR REFRESH STREAMING TABLE main.dbsql_warehouse_advisor.warehouse_raw_events
+SCHEDULE CRON '0 0 * * * ? *' -- hourly
+CLUSTER BY (workspace_id, warehouse_id, event_time)
+AS 
     SELECT 
         event_time, 
         workspace_id, 
@@ -214,71 +199,49 @@ WITH warehouse_raw_events AS (
         action_name,
         response,
         request_params,
-        user_identity.email AS warehouse_editor_user
-    FROM system.access.audit
-    WHERE service_name = 'databrickssql'
-    AND action_name IN ('createWarehouse', 'createEndpoint', 'editWarehouse', 'editEndpoint', 'deleteWarehouse', 'deleteEndpoint')
-    AND response.status_code = '200'
-),
-
-edit_history AS (
-    SELECT 
-        event_time, 
-        workspace_id, 
-        account_id, 
-        action_name,
-        FROM_JSON(response['result'], 'Map<STRING, STRING>')['id'] AS warehouse_id, 
+        user_identity.email AS warehouse_editor_user,
+        CASE WHEN action_name IN ('createWarehouse', 'createEndpoint') THEN FROM_JSON(response['result'], 'Map<STRING, STRING>')['id'] 
+            ELSE request_params.id
+            END AS warehouse_id, 
         request_params.name AS warehouse_name, 
         request_params.warehouse_type AS warehouse_type,
         request_params.auto_stop_mins AS auto_stop_mins,
         request_params.cluster_size AS warehouse_size,
         CAST(request_params.min_num_clusters AS INTEGER) AS min_cluster_scaling,
         CAST(request_params.max_num_clusters AS INTEGER) AS max_cluster_scaing,
-        CAST(request_params.channel:name AS STRING) AS warehouse_channel,
-        warehouse_editor_user
-    FROM warehouse_raw_events
+        CAST(request_params.channel:name AS STRING) AS warehouse_channel
+    FROM STREAM(system.access.audit)
+    WHERE service_name = 'databrickssql'
+    AND action_name IN ('createWarehouse', 'createEndpoint', 'editWarehouse', 'editEndpoint', 'deleteWarehouse', 'deleteEndpoint')
+    AND response.status_code = '200'
+;
+
+
+CREATE OR REPLACE VIEW main.dbsql_warehouse_advisor.warehouse_scd
+COMMENT 'SQL Warehouse SCD Change History'
+AS (
+WITH edit_history AS (
+    SELECT 
+        *
+    FROM main.dbsql_warehouse_advisor.warehouse_raw_events
     WHERE action_name IN ('createWarehouse', 'createEndpoint')
     QUALIFY ROW_NUMBER() OVER (
         PARTITION BY warehouse_id
         ORDER BY event_time DESC
     ) = 1
 
-    UNION ALL 
+    UNION ALL
 
     SELECT 
-        event_time, 
-        workspace_id, 
-        account_id, 
-        action_name,
-        request_params.id AS warehouse_id,
-        request_params.name AS warehouse_name,
-        request_params.warehouse_type AS warehouse_type,
-        request_params.auto_stop_mins AS auto_stop_mins,
-        request_params.cluster_size AS warehouse_size,
-        CAST(request_params.min_num_clusters AS INTEGER) AS min_cluster_scaling,
-        CAST(request_params.max_num_clusters AS INTEGER) AS max_cluster_scaing,
-        CAST(request_params.channel:name AS STRING) AS warehouse_channel,
-        warehouse_editor_user
-    FROM warehouse_raw_events
+        *
+    FROM main.dbsql_warehouse_advisor.warehouse_raw_events
     WHERE action_name IN ('editWarehouse', 'editEndpoint')
 
     UNION ALL
 
     SELECT 
-        event_time, 
-        workspace_id, 
-        account_id, 
-        action_name,
-        request_params.id AS warehouse_id,
-        NULL AS warehouse_name, 
-        NULL AS warehouse_type,
-        NULL AS auto_stop_mins,
-        NULL AS warehouse_size,
-        NULL AS min_cluster_scaling,
-        NULL AS max_cluster_scaing,
-        NULL AS warehouse_channel,
-        warehouse_editor_user
-    FROM warehouse_raw_events
+        *
+    FROM main.dbsql_warehouse_advisor.warehouse_raw_events
     WHERE action_name IN ('deleteWarehouse', 'deleteEndpoint')
 )
 
@@ -292,38 +255,4 @@ SELECT
         ELSE 'Active' 
     END AS IsDeleted
 FROM edit_history
-
-);
-
-
---DROP MATERIALIZED VIEW  main.dbsql_warehouse_advisor.warehouse_current;
-CREATE MATERIALIZED VIEW IF NOT EXISTS main.dbsql_warehouse_advisor.warehouse_current
-COMMENT 'SQL Warehouse Current Definition - including deleted flag'
-SCHEDULE CRON '0 0 0 * * ? *'
-TBLPROPERTIES ('pipelines.autoOptimize.zOrderCols'= 'event_time,warehouse_id')
-AS (
-WITH active_warehouses AS (
-    SELECT 
-        *,
-        FIRST_VALUE(warehouse_editor_user) OVER (PARTITION BY account_id, workspace_id, warehouse_id ORDER BY event_time ASC) AS warehouse_creator,
-        LAST_VALUE(warehouse_editor_user) OVER (PARTITION BY account_id, workspace_id, warehouse_id ORDER BY event_time ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS warehouse_latest_editor
-    FROM main.dbsql_warehouse_advisor.warehouse_scd 
-    WHERE action_name IN ('createWarehouse', 'createEndpoint', 'editWarehouse', 'editEndpoint') -- Exclude delete events
-    QUALIFY ROW_NUMBER() OVER (PARTITION BY account_id, workspace_id, warehouse_id ORDER BY event_time DESC) = 1
-),
-
-with_delete_flag AS (
-    SELECT *,
-    CASE 
-        WHEN (SELECT COUNT(*) 
-              FROM main.dbsql_warehouse_advisor.warehouse_scd AS innr
-              WHERE action_name IN ('deleteWarehouse', 'deleteEndpoint')
-              AND innr.warehouse_id = aw.warehouse_id
-             ) > 0 THEN 'Deleted' 
-        ELSE 'Active' 
-    END AS IsDeletedCurrently
-    FROM active_warehouses AS aw
-)
-
-SELECT * FROM with_delete_flag
 );
