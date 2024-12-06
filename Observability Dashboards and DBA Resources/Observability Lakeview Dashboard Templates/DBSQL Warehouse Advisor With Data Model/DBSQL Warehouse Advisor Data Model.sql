@@ -1,3 +1,4 @@
+-- MUST Run with a Serverless Warehouse
 DROP SCHEMA IF EXISTS main.dbsql_warehouse_advisor CASCADE;
 CREATE SCHEMA IF NOT EXISTS main.dbsql_warehouse_advisor;
   -- LOCATION 's3://<location>/'; -- Optional location parameter
@@ -6,6 +7,7 @@ USE SCHEMA dbsql_warehouse_advisor;
 
 
 CREATE OR REFRESH STREAMING TABLE main.dbsql_warehouse_advisor.warehouse_query_history
+--TBLPROPERTIES ('pipelines.channel' = 'PREVIEW')
 SCHEDULE CRON '0 0 * * * ? *' -- hourly
 CLUSTER BY (workspace_id, warehouse_id, start_time)
 COMMENT 'SQL Warehouse Query History with cleaned up exeuction metrics and query tags'
