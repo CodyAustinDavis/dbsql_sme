@@ -1,3 +1,19 @@
+/*
+Author: Cody Austin Davis
+Date: 12/11/2024
+Description / Purpose: This script serves as a data model to stream from system tables and build a performant gold layer for operational analytics on system tables. 
+Streaming from system tables into a separate model is helpful for longer term data retension (past the sys table retention windows), as well as performance (not reading from delta shares but local tables). 
+
+
+NOTES: 
+1. This is the STREAMING TABLE version. Some features may be in the PREVIEW channel. If you try to deploy this script and get erros try adding the following table property: 
+TBLPROPERTIES ('pipelines.channel' = 'PREVIEW')
+
+2. The schedeule defaults to an hourly refresh. You can change this at any time with a ALTER STREAMING TABLE command. 
+
+
+*/
+
 -- MUST Run with a Serverless Warehouse
 DROP SCHEMA IF EXISTS main.dbsql_warehouse_advisor CASCADE;
 CREATE SCHEMA IF NOT EXISTS main.dbsql_warehouse_advisor;
