@@ -151,14 +151,16 @@ SELECT
     END AS IsDBTQuery,
 
 -- NEW - Query source
-    CASE WHEN query_source.job_info.job_id IS NOT NULL THEN 'JOB'
-    WHEN query_source.legacy_dashboard_id IS NOT NULL THEN 'LEGACY DASHBOARD'
-    WHEN query_source.dashboard_id IS NOT NULL THEN 'AI/BI DASHBOARD'
-    WHEN query_source.alert_id IS NOT NULL THEN 'ALERT'
-    WHEN query_source.notebook_id IS NOT NULL THEN 'NOTEBOOK'
-    WHEN query_source.sql_query_id IS NOT NULL THEN 'SQL QUERY'
-    WHEN query_source.genie_space_id IS NOT NULL THEN 'GENIE SPACE'
-    ELSE 'UNKNOWN'
+    CASE
+      WHEN query_source.job_info.job_id IS NOT NULL THEN 'JOB'
+      WHEN query_source.legacy_dashboard_id IS NOT NULL THEN 'LEGACY DASHBOARD'
+      WHEN query_source.dashboard_id IS NOT NULL THEN 'AI/BI DASHBOARD'
+      WHEN query_source.alert_id IS NOT NULL THEN 'ALERT'
+      WHEN query_source.notebook_id IS NOT NULL THEN 'NOTEBOOK'
+      WHEN query_source.sql_query_id IS NOT NULL THEN 'SQL QUERY'
+      WHEN query_source.genie_space_id IS NOT NULL THEN 'GENIE SPACE'
+      WHEN client_application IS NOT NULL THEN client_application
+      ELSE 'UNKNOWN'
     END AS query_source_type,
 coalesce(query_source.job_info.job_id, query_source.legacy_dashboard_id, query_source.dashboard_id, query_source.alert_id, query_source.notebook_id, query_source.sql_query_id, query_source.genie_space_id, 'UNKNOWN') AS query_source_id
 
