@@ -1,0 +1,45 @@
+[
+    {
+      "task_id": 2,
+      "task_type": "ingest_bronze_silver",
+      "task_params": {
+        "bronze_table": "bronze_orders",
+        "primary_key": "o_orderkey",
+        "silver_table": "silver_orders",
+        "src_column_list": "o_orderkey int, o_custkey int, o_orderstatus string, o_totalprice double, o_order_date date, o_orderpriority string, o_clerk string, o_shippriority int, o_comment string, o_dummy string",
+        "src_format": "csv",
+        "src_header": false,
+        "src_path": "orders",
+        "src_sep": "|"
+      }
+    },
+    {
+      "task_id": 1,
+      "task_type": "ingest_bronze_silver",
+      "task_params": {
+        "bronze_table": "bronze_customer",
+        "primary_key": "c_custkey",
+        "silver_table": "silver_customer",
+        "src_column_list": "c_custkey int, c_name string, c_address string, c_nationkey int, c_phone string, c_acctbal decimal(15,2), c_mktsegment string, c_comment string, c_dummy string",
+        "src_format": "csv",
+        "src_header": false,
+        "src_path": "customer",
+        "src_sep": "|"
+      }
+    },
+    {
+      "task_id": 3,
+      "task_type": "ingest_bronze_silver",
+      "task_params": {
+        "bronze_table": "bronze_lineitem",
+        "primary_key": "l_orderkey",
+        "silver_table": "silver_lineitem",
+        "src_column_list": "l_orderkey int, l_partkey int, l_suppkey int, l_linenumber int, l_quantity decimal(15,2), l_extendedprice decimal(15,2), l_discount decimal(15,2), l_tax decimal(15,2), l_returnflag string, l_linestatus string, l_shipdate date, l_commitdate date, l_receiptdate date, l_shipinstruct string, l_shipmode string, l_comment string, l_dummy string",
+        "src_format": "csv",
+        "src_header": false,
+        "src_path": "lineitem",
+        "src_sep": "|"
+      }
+    }
+]
+  
