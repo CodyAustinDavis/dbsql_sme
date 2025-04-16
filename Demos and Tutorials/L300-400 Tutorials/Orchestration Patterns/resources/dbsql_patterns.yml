@@ -1,0 +1,179 @@
+resources:
+  jobs:
+    init_tpch_historical_load:
+      name: init_tpch_historical_load
+      tasks:
+        - task_key: tpch_historical_load_task
+          notebook_task:
+            notebook_path: ../src/init/tpch_historical_load.ipynb
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+      queue:
+        enabled: true
+    init_move_config_to_volume:
+      name: init_move_config_to_volume
+      tasks:
+        - task_key: init_move_config_to_volume_task
+          notebook_task:
+            notebook_path: ../src/init/move_config_to_volume.ipynb
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+      queue:
+        enabled: true    
+
+    load_bronze_silver:
+      name: load_bronze_silver
+      max_concurrent_runs: 100
+      tasks:
+        - task_key: load_bronze
+          sql_task:
+            file:
+              path: ../src/config_driven_pattern_code/bronze_copy_into.sql
+            warehouse_id: ${var.warehouse_id}
+        - task_key: merge_into_silver
+          depends_on:
+            - task_key: load_bronze
+          sql_task:
+            file:
+              path: ../src/config_driven_pattern_code/silver_merge_into.sql
+            warehouse_id: ${var.warehouse_id}
+      queue:
+        enabled: true
+      parameters:
+        - name: merge_primary_key
+          default: ""
+        - name: merge_src_table
+          default: ""
+        - name: merge_tgt_table
+          default: ""
+        - name: src_column_list
+          default: ""
+        - name: src_format
+          default: ""
+        - name: src_header
+          default: ""
+        - name: src_path
+          default: ""
+        - name: src_sep
+          default: ""
+        - name: tgt_catalog
+          default: ""
+        - name: tgt_schema
+          default: ""
+        - name: tgt_table
+          default: ""
+
+    DBSQL_For_Each_1_Simple_Loop:
+      name: "DBSQL For Each: (1) Simple Loop"
+      tasks:
+        - task_key: load_bronze
+          for_each_task:
+            inputs: '[{"bronze_catalog":"justin_kolpak","bronze_schema":"blog2","bronze_table":"bronze_customer","primary_key":"c_custkey","silver_catalog":"justin_kolpak","silver_schema":"tpch","silver_table":"silver_customer","src_column_list":"c_custkey
+              int, c_name string, c_address string, c_nationkey int, c_phone
+              string, c_acctbal decimal(15,2), c_mktsegment string, c_comment
+              string, c_dummy
+              string","src_format":"csv","src_header":"false","src_path":"/Volumes/justin_kolpak/tpch/raw/customer","src_sep":"|"},{"bronze_catalog":"justin_kolpak","bronze_schema":"blog2","bronze_table":"bronze_orders","primary_key":"o_orderkey","silver_catalog":"justin_kolpak","silver_schema":"tpch","silver_table":"silver_orders","src_column_list":"o_orderkey
+              int, o_custkey int, o_orderstatus string, o_totalprice double,
+              o_order_date date, o_orderpriority string, o_clerk string,
+              o_shippriority int, o_comment string, o_dummy string","src_format":"csv","src_header":"false","src_path":"/Volumes/justin_kolpak/tpch/raw/orders","src_sep":"|"},{"bronze_catalog":"justin_kolpak","bronze_schema":"blog2","bronze_table":"bronze_lineitem","primary_key":"l_orderkey","silver_catalog":"justin_kolpak","silver_schema":"tpch","silver_table":"silver_lineitem","src_column_list":"l_orderkey
+              int, l_partkey int, l_suppkey int, l_linenumber int, l_quantity
+              decimal(15,2), l_extendedprice decimal(15,2), l_discount
+              decimal(15,2), l_tax decimal(15,2), l_returnflag string,
+              l_linestatus string, l_shipdate date, l_commitdate date,
+              l_receiptdate date, l_shipinstruct string, l_shipmode string,
+              l_comment string, l_dummy string","src_format":"csv","src_header":"false","src_path":"/Volumes/justin_kolpak/tpch/raw/lineitem","src_sep":"|"}]'
+            concurrency: 10
+            task:
+              task_key: load_bronze_iteration
+              sql_task:
+                parameters:
+                  tgt_table: "{{input.bronze_table}}"
+                  tgt_schema: "{{input.bronze_schema}}"
+                  src_path: "{{input.src_path}}"
+                  src_sep: "{{input.src_sep}}"
+                  src_column_list: "{{input.src_column_list}}"
+                  src_format: "{{input.src_format}}"
+                  tgt_catalog: "{{input.bronze_catalog}}"
+                  src_header: "{{input.src_header}}"
+                file:
+                  path: ../src/config_driven_pattern_code/bronze_copy_into.sql
+                warehouse_id: ${var.warehouse_id}
+      queue:
+        enabled: true
+    DBSQL_For_Each_2_With_Task_Values:
+      name: "DBSQL For Each: (2) With Task Values"
+      tasks:
+        - task_key: get_ingest_metadata
+          sql_task:
+            parameters: 
+                catalog_name: ${var.catalog_name}
+                schema_name: ${var.schema_name}
+            file:
+              path: ../src/config_driven_pattern_code/get_ingest_metadata.sql              
+            warehouse_id: ${var.warehouse_id}
+        - task_key: load_bronze
+          depends_on:
+            - task_key: get_ingest_metadata
+          for_each_task:
+            inputs: "{{tasks.get_ingest_metadata.output.rows}}"
+            concurrency: 10
+            task:
+              task_key: load_bronze_iteration
+              sql_task:
+                parameters:
+                  tgt_table: "{{input.bronze_table}}"
+                  tgt_schema: "{{input.bronze_schema}}"
+                  src_path: "{{input.src_path}}"
+                  src_sep: "{{input.src_sep}}"
+                  src_column_list: "{{input.src_column_list}}"
+                  src_format: "{{input.src_format}}"
+                  tgt_catalog: "{{input.bronze_catalog}}"
+                  src_header: "{{input.src_header}}"
+                file:
+                  path: ../src/config_driven_pattern_code/bronze_copy_into.sql
+                warehouse_id: ${var.warehouse_id}
+      queue:
+        enabled: true
+      environments:
+        - environment_key: dbt-default
+          spec:
+            client: "1"
+            dependencies:
+              - dbt-databricks>=1.0.0,<2.0.0
+    DBSQL_For_Each_3_Run_another_Job:
+      name: "DBSQL For Each: (3) Run another Job"
+      tasks:
+        - task_key: get_ingest_metadata
+          sql_task:
+            parameters: 
+                catalog_name: ${var.catalog_name}
+                schema_name: ${var.schema_name}
+            file:
+              path: ../src/config_driven_pattern_code/get_ingest_metadata.sql              
+            warehouse_id: ${var.warehouse_id}
+        - task_key: load_bronze_silver_loop
+          depends_on:
+            - task_key: get_ingest_metadata
+          for_each_task:
+            inputs: "{{tasks.get_ingest_metadata.output.rows}}"
+            concurrency: 10
+            task:
+              task_key: load_bronze_silver_loop_iteration
+              run_job_task:
+                job_id: ${resources.jobs.load_bronze_silver.id}
+                job_parameters:
+                  tgt_table: "{{input.bronze_table}}"
+                  tgt_schema: "{{input.bronze_schema}}"
+                  src_path: "{{input.src_path}}"
+                  src_sep: "{{input.src_sep}}"
+                  src_column_list: "{{input.src_column_list}}"
+                  src_format: "{{input.src_format}}"
+                  merge_src_table: "{{input.bronze_table}}"
+                  tgt_catalog: "{{input.bronze_catalog}}"
+                  merge_primary_key: "{{input.primary_key}}"
+                  src_header: "{{input.src_header}}"
+                  merge_tgt_table: "{{input.silver_table}}"
+      queue:
+        enabled: true

@@ -1,0 +1,43 @@
+# This is a Databricks asset bundle definition for dbsql_workflows.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+bundle:
+  name: dbsql_workflows
+
+include:
+  - resources/*.yml
+
+# TO DO: Update these for the configurations in the target environment
+variables:
+  warehouse_id:
+    description: Warehouse ID for SQL tasks
+    default: // ENTER YOUR WAREHOUSE ID 
+  catalog_name:
+    description: Target catalog for dataset
+    default: // ENTER YOUR TARGET CATALOG NAME
+  schema_name: 
+    description: Target schema for dataset
+    default: // ENTER YOUR TARGET SCHEMA NAME
+
+
+targets:
+  # The 'dev' target, for development purposes. This target is the default.
+  dev:
+    # We use 'mode: development' to indicate this is a personal development copy:
+    # - Deployed resources get prefixed with '[dev my_user_name]'
+    # - Any job schedules and triggers are paused by default
+    # - The 'development' mode is used for Delta Live Tables pipelines
+    mode: development
+    default: true
+    workspace:
+      host: // ENTER YOUR WORKSPACE HOSTNAME URL HERE
+
+  # The 'prod' target, used for production deployment.
+  prod:
+    # We use 'mode: production' to indicate this is a production deployment.
+    # Doing so enables strict verification of the settings below.
+    mode: production
+    workspace:
+      host: // ENTER YOUR WORKSPACE HOSTNAME URL HERE
+      root_path: /Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      user_name: ${workspace.current_user.userName}
