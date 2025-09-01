@@ -1,0 +1,15 @@
+bundle:
+  name: sla_monitor
+
+include:
+  - resources/*.yml
+
+workspace:
+  file_path: /Workspace/Users/${workspace.current_user.userName}/Warehouse_SLA_Monitoring/files
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://e2-demo-field-eng.cloud.databricks.com
