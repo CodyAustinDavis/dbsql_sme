@@ -891,7 +891,9 @@
         "        end_time_window,\n",
         "        CONCAT(CAST(start_time_window AS STRING), ' to ', CAST(end_time_window AS STRING)) AS time_window_string\n",
         "    FROM forecast\n",
-        ")\n",
+        "),\n",
+        "\n",
+        "final_results AS (\n",
         "\n",
         "SELECT\n",
         "    time_key,\n",
@@ -936,6 +938,12 @@
         "    CONCAT(CAST(start_time_window AS STRING), ' to ', CAST(end_time_window AS STRING)) AS time_window_string\n",
         "FROM final_forecast\n",
         "WHERE CASE WHEN :forecast_toggle = 'Enabled' THEN TRUE ELSE FALSE END\n",
+        ")\n",
+        "\n",
+        "SELECT \n",
+        "*,\n",
+        "first_value(time_window_string) OVER(ORDER BY time_key DESC) AS forecast_time_window_string\n",
+        "FROM final_results\n",
         "\n",
         "\n",
         "\n"
@@ -5641,7 +5649,7 @@
           },
           "position": {
             "x": 0,
-            "y": 48,
+            "y": 46,
             "width": 6,
             "height": 13
           }
@@ -5745,7 +5753,7 @@
             ],
             "spec": {
               "version": 3,
-              "widgetType": "bar",
+              "widgetType": "area",
               "encodings": {
                 "x": {
                   "fieldName": "time_key",
@@ -5971,8 +5979,8 @@
                   "datasetName": "e1dac524",
                   "fields": [
                     {
-                      "name": "time_window_string",
-                      "expression": "`time_window_string`"
+                      "name": "forecast_time_window_string",
+                      "expression": "`forecast_time_window_string`"
                     },
                     {
                       "name": "sum(usage_usd_dynamic)",
@@ -6014,8 +6022,9 @@
                   "displayName": "Sum of usage_usd_dynamic"
                 },
                 "target": {
-                  "fieldName": "time_window_string",
-                  "displayName": "time_window_string"
+                  "fieldName": "forecast_time_window_string",
+                  "rowNumber": 0,
+                  "displayName": "forecast_time_window_string"
                 }
               },
               "frame": {
@@ -6331,7 +6340,7 @@
           },
           "position": {
             "x": 0,
-            "y": 22,
+            "y": 31,
             "width": 6,
             "height": 9
           }
@@ -6375,7 +6384,72 @@
           },
           "position": {
             "x": 0,
-            "y": 42,
+            "y": 40,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "cafe2790",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cd4e3c97",
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {}
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 59,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "f216b398",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cd4e3c97",
+                  "fields": [
+                    {
+                      "name": "count(toggle)",
+                      "expression": "COUNT(`toggle`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(toggle)",
+                  "displayName": "Count of toggle"
+                }
+              },
+              "frame": {
+                "title": "Toggle Counter",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 25,
             "width": 3,
             "height": 6
           }
