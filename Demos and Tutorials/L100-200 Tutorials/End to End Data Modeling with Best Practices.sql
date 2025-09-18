@@ -1,6 +1,6 @@
 -- Databricks notebook source
 -- MAGIC %md
--- MAGIC # Data Modeling & Performance 101 on Databricks + Delta!
+-- MAGIC # Data Modeling & Performance 101 on Databricks!
 -- MAGIC
 -- MAGIC This notebook and workshop will take you through how to use the best of Databricks - all on Databricsk SQL with NO Spark Knowledge Required!
 -- MAGIC
@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS main.model_tpch.customer (
 )
 CLUSTER BY (c_custkey);
 
+ALTER TABLE main.model_tpch.customer SET TBLPROPERTIES ('delta.targetFileSize' = '4mb');
+
 -- Orders table
 CREATE TABLE IF NOT EXISTS main.model_tpch.orders (
     o_orderkey INT PRIMARY KEY,
@@ -46,7 +48,9 @@ CREATE TABLE IF NOT EXISTS main.model_tpch.orders (
     o_shippriority INT,
     o_comment STRING
 )
-CLUSTER BY (o_orderdate, o_custkey);
+CLUSTER BY (o_orderdate, o_orderkey, o_custkey);
+
+ALTER TABLE main.model_tpch.orders SET TBLPROPERTIES ('delta.targetFileSize' = '4mb');
 
 -- Lineitem table
 CREATE TABLE IF NOT EXISTS main.model_tpch.lineitem (
@@ -68,8 +72,9 @@ CREATE TABLE IF NOT EXISTS main.model_tpch.lineitem (
     l_comment STRING,
     PRIMARY KEY (l_orderkey, l_linenumber)
 )
-CLUSTER BY (l_orderkey, l_linenumber);
+CLUSTER BY (l_orderkey);
 
+ALTER TABLE main.model_tpch.lineitem SET TBLPROPERTIES ('delta.targetFileSize' = '4mb');
 -- Part table
 CREATE TABLE IF NOT EXISTS main.model_tpch.part (
     p_partkey INT PRIMARY KEY,
@@ -129,13 +134,13 @@ ALTER TABLE main.model_tpch.customer
 ADD CONSTRAINT fk_customer_nation FOREIGN KEY (c_nationkey) REFERENCES main.model_tpch.nation(n_nationkey);
 
 ALTER TABLE main.model_tpch.orders
-ADD CONSTRAINT fk_orders_customer FOREIGN KEY (o_custkey) REFERENCES main.model_tpch.customer(c_custkey);
+ADD CONSTRAINT fk_orders_customer FOREIGN KEY (o_custkey) REFERENCES main.model_tpch.customer(c_custkey) RELY;
 
 ALTER TABLE main.model_tpch.lineitem 
-ADD CONSTRAINT fk_lineitem_orders FOREIGN KEY (l_orderkey) REFERENCES main.model_tpch.orders(o_orderkey);
+ADD CONSTRAINT fk_lineitem_orders FOREIGN KEY (l_orderkey) REFERENCES main.model_tpch.orders(o_orderkey) RELY;
 
 ALTER TABLE main.model_tpch.lineitem 
-ADD CONSTRAINT fk_lineitem_part FOREIGN KEY (l_partkey) REFERENCES main.model_tpch.part(p_partkey);
+ADD CONSTRAINT fk_lineitem_part FOREIGN KEY (l_partkey) REFERENCES main.model_tpch.part(p_partkey) RELY;
 
 ALTER TABLE main.model_tpch.lineitem 
 ADD CONSTRAINT fk_lineitem_supplier FOREIGN KEY (l_suppkey) REFERENCES main.model_tpch.supplier(s_suppkey);
@@ -152,6 +157,9 @@ ADD CONSTRAINT fk_supplier_nation FOREIGN KEY (s_nationkey) REFERENCES main.mode
 ALTER TABLE main.model_tpch.nation
 ADD CONSTRAINT fk_nation_region FOREIGN KEY (n_regionkey) REFERENCES main.model_tpch.region(r_regionkey);
 
+-- Other data validation constraints that can be enforced or not
+ALTER TABLE main.model_tpch.orders
+ADD CONSTRAINT order_validation CHECK (o_orderkey > 0);
 -- Step 4: Insert data from source tables into the new tables
 INSERT INTO main.model_tpch.customer
 SELECT * FROM samples.tpch.customer;
@@ -182,8 +190,6 @@ ANALYZE TABLE main.model_tpch.customer COMPUTE STATISTICS FOR ALL COLUMNS;
 ANALYZE TABLE main.model_tpch.orders COMPUTE STATISTICS FOR ALL COLUMNS;
 ANALYZE TABLE main.model_tpch.lineitem COMPUTE STATISTICS FOR ALL COLUMNS;
 ANALYZE TABLE main.model_tpch.part COMPUTE STATISTICS FOR ALL COLUMNS;
-
-
 
 -- COMMAND ----------
 
@@ -242,6 +248,8 @@ WHERE
 -- COMMAND ----------
 
 -- DBTITLE 1,Show File Pruning AND Predictive IO Working Together for Larger Tables
+SET use_cached_result=false;
+
 SELECT 
     o.o_orderkey, 
     o.o_orderdate, 
@@ -293,6 +301,8 @@ OPTIMIZE main.model_tpch.customer
 
 -- COMMAND ----------
 
+SET use_cached_result=false;
+
 SELECT 
     p.p_name, 
     AVG(l.l_quantity) AS avg_quantity
@@ -311,7 +321,7 @@ JOIN
 ON 
     o.o_custkey = c.c_custkey
 WHERE 
-    c.c_custkey IN (1, 2, 3)
+    c.c_custkey IN (1)
 GROUP BY 
     p.p_name
 ORDER BY 
@@ -324,6 +334,8 @@ OPTIMIZE main.model_tpch.lineitem;
 -- COMMAND ----------
 
 -- DBTITLE 1,More Complex Aggregation & Visualization
+SET use_cached_result=false;
+
 SELECT 
     o.o_orderkey, 
     SUM(l.l_extendedprice) AS total_extended_price, 
