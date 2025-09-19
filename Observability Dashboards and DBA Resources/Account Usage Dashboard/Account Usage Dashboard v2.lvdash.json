@@ -323,6 +323,16 @@
       ]
     },
     {
+      "name": "deb49646",
+      "displayName": "select_tag_search_mode",
+      "queryLines": [
+        "select explode(array(\n",
+        "  'AND',\n",
+        "  'OR'\n",
+        ")) as group_key"
+      ]
+    },
+    {
       "name": "bb990f09",
       "displayName": "select_include_remaining",
       "queryLines": [
@@ -2046,11 +2056,11 @@
         "      -- Dynamic Prices Logic\n",
         "      COALESCE(\n",
         "        -- When there is a * global discounts, then use that for all\n",
-        "        (1-try_cast(regexp_extract(:discounts_by_product, '\\\\s*\\\\*\\\\s*=\\\\s*([0-9]*\\\\.?[0-9]+)', 1) AS decimal(10, 3)))* p.pricing.effective_list.default * u.usage_quantity,\n",
+        "        (1-try_cast(regexp_extract(:discounts_by_product, '\\\\s*\\\\*\\\\s*=\\\\s*([0-9]*\\\\.?[0-9]+)', 1) AS decimal(10, 3)))* p.pricing.default * u.usage_quantity,\n",
         "            -- When no account prices enabled, then use overrides first then default pricing\n",
-        "        (1-COALESCE(discounts.discount, 0))* p.pricing.effective_list.default * u.usage_quantity,\n",
+        "        (1-COALESCE(discounts.discount, 0))* p.pricing.default * u.usage_quantity,\n",
         "        -- When all else fails, use default\n",
-        "        p.pricing.effective_list.default * u.usage_quantity) as usage_usd,\n",
+        "        p.pricing.default * u.usage_quantity) as usage_usd,\n",
         "    usage_quantity AS usage_dbus,\n",
         "    date_trunc('YEAR', usage_date) as usage_year,\n",
         "    date_trunc('QUARTER', usage_date) as usage_quarter,\n",
@@ -2106,18 +2116,18 @@
         "FROM usage_filtered AS u\n",
         "),\n",
         "\n",
-        "matched_records AS (SELECT record_id,\n",
+        "matched_records AS (SELECT\n",
+        "    record_id,\n",
         "       -- array of maps that match\n",
-        "      array_agg(CASE WHEN tag_id IS NOT NULL THEN concat(spine.key, '=', spine.value) END) AS matched_tags_array,\n",
-        "      array_agg(concat(spine.key, '=', spine.value)) AS usage_tags_array,\n",
+        "      array_distinct(array_agg(CASE WHEN tag_id IS NOT NULL THEN concat(spine.key, '=', spine.value) END)) AS matched_tags_array,\n",
+        "      array_distinct(array_agg(concat(spine.key, '=', spine.value))) AS usage_tags_array,\n",
         "      -- Add keys only agg view\n",
-        "      array_agg(CASE WHEN tag_id IS NOT NULL THEN spine.key END) AS matched_keys_array,\n",
-        "      array_agg(spine.key) AS usage_keys_array,  \n",
+        "      array_distinct(array_agg(CASE WHEN tag_id IS NOT NULL THEN spine.key END)) AS matched_keys_array,\n",
+        "      array_distinct(array_agg(spine.key)) AS usage_keys_array,  \n",
         "      -- \n",
         "      size(matched_tags_array) AS matched_tag_count,\n",
         "      (SELECT COUNT (0) FROM tag_entry_parsing WHERE length(tag_entry) > 0) AS search_tag_count,\n",
-        "\n",
-        "      if(search_tag_count = 0 OR search_tag_count = size(matched_tags_array),\n",
+        "      if(search_tag_count = 0 OR (CASE WHEN :tag_search_mode = \"AND\" THEN search_tag_count <= matched_tag_count WHEN :tag_search_mode = \"OR\" THEN matched_tag_count > 0 END),\n",
         "      -- Add key aggregation option\n",
         "      CASE WHEN :group_agg_mode = 'Key-Value Pairs' THEN array_join(array_distinct(matched_tags_array), ';') WHEN :group_agg_mode = 'Keys' THEN array_join(array_distinct(matched_keys_array), ';') END\n",
         "      , ''\n",
@@ -2125,7 +2135,7 @@
         "\n",
         "      if(_custom_tag_key_value_pairs = \"\", '<NO TAG MATCH>', _custom_tag_key_value_pairs) as custom_tag_key_value_pairs,\n",
         "       -- Is match yes/no\n",
-        "       if (search_tag_count = 0 OR search_tag_count = size(matched_tags_array), '<TAG MATCH>', '<NO TAG MATCH>') AS IsMatched\n",
+        "       if (search_tag_count = 0 OR (CASE WHEN :tag_search_mode = \"AND\" THEN search_tag_count <= matched_tag_count WHEN :tag_search_mode = \"OR\" THEN matched_tag_count > 0 END), '<TAG MATCH>', '<NO TAG MATCH>') AS IsMatched\n",
         "FROM exploded_usage_tags_to_compare AS spine\n",
         "LEFT JOIN tag_entry_parsing AS tt ON\n",
         "    (CASE WHEN :normalize_case = 'Yes'\n",
@@ -2145,7 +2155,6 @@
         "GROUP BY record_id\n",
         "),\n",
         "\n",
-        "\n",
         "-- match tag entries\n",
         "list_priced_usd_with_matching_tag_kvp as (\n",
         "  select\n",
@@ -2159,7 +2168,6 @@
         "    list_priced_usd_with_time_key k\n",
         "    left join matched_records as mt ON k.record_id = mt.record_id\n",
         "),\n",
-        "\n",
         "\n",
         "pre_ui_results AS (\n",
         "  -- query\n",
@@ -2210,7 +2218,7 @@
         "  END AS Measure_MatchedUsage,\n",
         "  *\n",
         "FROM\n",
-        "  pre_ui_results"
+        "  pre_ui_results\n"
       ],
       "parameters": [
         {
@@ -2263,6 +2271,22 @@
           }
         },
         {
+          "displayName": "is_serverless",
+          "keyword": "is_serverless",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "all"
+                }
+              ]
+            }
+          }
+        },
+        {
           "displayName": "discounts_by_product",
           "keyword": "discounts_by_product",
           "dataType": "STRING",
@@ -2272,6 +2296,21 @@
               "values": [
                 {
                   "value": "sql=0.0;VECTOR_SEARCH=0.0;ALL_PURPOSE=0.0;MODEL_SERVING=0.0;JOBS=0.0;INTERACTIVE=0.0;LAKEHOUSE_MONITORING=0.0;DLT=0.0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "price_table",
+          "keyword": "price_table",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "system.billing.list_prices"
                 }
               ]
             }
@@ -2302,21 +2341,6 @@
               "values": [
                 {
                   "value": "Budget;Env"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "displayName": "group_agg_mode",
-          "keyword": "group_agg_mode",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": [
-                {
-                  "value": "Key-Value Pairs"
                 }
               ]
             }
@@ -2383,31 +2407,30 @@
           }
         },
         {
-          "displayName": "price_table",
-          "keyword": "price_table",
+          "displayName": "tag_search_mode",
+          "keyword": "tag_search_mode",
           "dataType": "STRING",
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
               "values": [
                 {
-                  "value": "system.billing.list_prices"
+                  "value": "AND"
                 }
               ]
             }
           }
         },
         {
-          "displayName": "is_serverless",
-          "keyword": "is_serverless",
+          "displayName": "group_agg_mode",
+          "keyword": "group_agg_mode",
           "dataType": "STRING",
-          "complexType": "MULTI",
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
               "values": [
                 {
-                  "value": "all"
+                  "value": "Key-Value Pairs"
                 }
               ]
             }
@@ -2559,18 +2582,18 @@
         "FROM usage_filtered AS u\n",
         "),\n",
         "\n",
-        "matched_records AS (SELECT record_id,\n",
+        "matched_records AS (SELECT\n",
+        "    record_id,\n",
         "       -- array of maps that match\n",
-        "      array_agg(CASE WHEN tag_id IS NOT NULL THEN concat(spine.key, '=', spine.value) END) AS matched_tags_array,\n",
-        "      array_agg(concat(spine.key, '=', spine.value)) AS usage_tags_array,\n",
+        "      array_distinct(array_agg(CASE WHEN tag_id IS NOT NULL THEN concat(spine.key, '=', spine.value) END)) AS matched_tags_array,\n",
+        "      array_distinct(array_agg(concat(spine.key, '=', spine.value))) AS usage_tags_array,\n",
         "      -- Add keys only agg view\n",
-        "      array_agg(CASE WHEN tag_id IS NOT NULL THEN spine.key END) AS matched_keys_array,\n",
-        "      array_agg(spine.key) AS usage_keys_array,  \n",
+        "      array_distinct(array_agg(CASE WHEN tag_id IS NOT NULL THEN spine.key END)) AS matched_keys_array,\n",
+        "      array_distinct(array_agg(spine.key)) AS usage_keys_array,  \n",
         "      -- \n",
         "      size(matched_tags_array) AS matched_tag_count,\n",
         "      (SELECT COUNT (0) FROM tag_entry_parsing WHERE length(tag_entry) > 0) AS search_tag_count,\n",
-        "\n",
-        "      if(search_tag_count = 0 OR search_tag_count = size(matched_tags_array),\n",
+        "      if(search_tag_count = 0 OR (CASE WHEN :tag_search_mode = \"AND\" THEN search_tag_count <= matched_tag_count WHEN :tag_search_mode = \"OR\" THEN matched_tag_count > 0 END),\n",
         "      -- Add key aggregation option\n",
         "      CASE WHEN :group_agg_mode = 'Key-Value Pairs' THEN array_join(array_distinct(matched_tags_array), ';') WHEN :group_agg_mode = 'Keys' THEN array_join(array_distinct(matched_keys_array), ';') END\n",
         "      , ''\n",
@@ -2578,7 +2601,7 @@
         "\n",
         "      if(_custom_tag_key_value_pairs = \"\", '&lt;NO TAG MATCH&gt;', _custom_tag_key_value_pairs) as custom_tag_key_value_pairs,\n",
         "       -- Is match yes/no\n",
-        "       if (search_tag_count = 0 OR search_tag_count = size(matched_tags_array), '&lt;TAG MATCH&gt;', '&lt;NO TAG MATCH&gt;') AS IsMatched\n",
+        "       if (search_tag_count = 0 OR (CASE WHEN :tag_search_mode = \"AND\" THEN search_tag_count <= matched_tag_count WHEN :tag_search_mode = \"OR\" THEN matched_tag_count > 0 END), '&lt;TAG MATCH&gt;', '&lt;NO TAG MATCH&gt;') AS IsMatched\n",
         "FROM exploded_usage_tags_to_compare AS spine\n",
         "LEFT JOIN tag_entry_parsing AS tt ON\n",
         "    (CASE WHEN :normalize_case = 'Yes'\n",
@@ -2916,7 +2939,7 @@
               "dataType": "STRING",
               "values": [
                 {
-                  "value": "Budget;Env"
+                  "value": "budgetpolicyname;budgetpolicyid"
                 }
               ]
             }
@@ -2938,21 +2961,6 @@
           }
         },
         {
-          "displayName": "normalize_case",
-          "keyword": "normalize_case",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": [
-                {
-                  "value": "Yes"
-                }
-              ]
-            }
-          }
-        },
-        {
           "displayName": "group_agg_mode",
           "keyword": "group_agg_mode",
           "dataType": "STRING",
@@ -2962,21 +2970,6 @@
               "values": [
                 {
                   "value": "Key-Value Pairs"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "displayName": "param_show_tag_mismatch",
-          "keyword": "param_show_tag_mismatch",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": [
-                {
-                  "value": "All Usage"
                 }
               ]
             }
@@ -3016,36 +3009,6 @@
           }
         },
         {
-          "displayName": "usage_toggle",
-          "keyword": "usage_toggle",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": [
-                {
-                  "value": "Dollars"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "displayName": "tag_group",
-          "keyword": "tag_group",
-          "dataType": "STRING",
-          "defaultSelection": {
-            "values": {
-              "dataType": "STRING",
-              "values": [
-                {
-                  "value": "Tag Key-Value Pairs"
-                }
-              ]
-            }
-          }
-        },
-        {
           "displayName": "is_serverless",
           "keyword": "is_serverless",
           "dataType": "STRING",
@@ -3071,6 +3034,81 @@
               "values": [
                 {
                   "value": "system.billing.list_prices"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "tag_search_mode",
+          "keyword": "tag_search_mode",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "AND"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "normalize_case",
+          "keyword": "normalize_case",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Yes"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "param_show_tag_mismatch",
+          "keyword": "param_show_tag_mismatch",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All Usage"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "usage_toggle",
+          "keyword": "usage_toggle",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Dollars"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "tag_group",
+          "keyword": "tag_group",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Tag Key-Value Pairs"
                 }
               ]
             }
@@ -3210,28 +3248,26 @@
         "FROM usage_filtered AS u\n",
         "),\n",
         "\n",
-        "matched_records AS (\n",
-        "  SELECT\n",
+        "matched_records AS (SELECT\n",
         "    record_id,\n",
         "       -- array of maps that match\n",
-        "      array_agg(CASE WHEN tag_id IS NOT NULL THEN concat(spine.key, '=', spine.value) END) AS matched_tags_array,\n",
-        "      array_agg(concat(spine.key, '=', spine.value)) AS usage_tags_array,\n",
+        "      array_distinct(array_agg(CASE WHEN tag_id IS NOT NULL THEN concat(spine.key, '=', spine.value) END)) AS matched_tags_array,\n",
+        "      array_distinct(array_agg(concat(spine.key, '=', spine.value))) AS usage_tags_array,\n",
         "      -- Add keys only agg view\n",
-        "      array_agg(CASE WHEN tag_id IS NOT NULL THEN spine.key END) AS matched_keys_array,\n",
-        "      array_agg(spine.key) AS usage_keys_array,  \n",
+        "      array_distinct(array_agg(CASE WHEN tag_id IS NOT NULL THEN spine.key END)) AS matched_keys_array,\n",
+        "      array_distinct(array_agg(spine.key)) AS usage_keys_array,  \n",
         "      -- \n",
         "      size(matched_tags_array) AS matched_tag_count,\n",
         "      (SELECT COUNT (0) FROM tag_entry_parsing WHERE length(tag_entry) > 0) AS search_tag_count,\n",
-        "\n",
-        "      if(search_tag_count = 0 OR search_tag_count = size(matched_tags_array),\n",
+        "      if(search_tag_count = 0 OR (CASE WHEN :tag_search_mode = \"AND\" THEN search_tag_count <= matched_tag_count WHEN :tag_search_mode = \"OR\" THEN matched_tag_count > 0 END),\n",
         "      -- Add key aggregation option\n",
         "      CASE WHEN :group_agg_mode = 'Key-Value Pairs' THEN array_join(array_distinct(matched_tags_array), ';') WHEN :group_agg_mode = 'Keys' THEN array_join(array_distinct(matched_keys_array), ';') END\n",
         "      , ''\n",
         "        )  as _custom_tag_key_value_pairs,\n",
         "\n",
-        "      if(_custom_tag_key_value_pairs = \"\", '&lt;NO TAG MATCH&gt;', _custom_tag_key_value_pairs) as custom_tag_key_value_pairs,\n",
+        "      if(_custom_tag_key_value_pairs = \"\", '<NO TAG MATCH>', _custom_tag_key_value_pairs) as custom_tag_key_value_pairs,\n",
         "       -- Is match yes/no\n",
-        "       if (search_tag_count = 0 OR search_tag_count = size(matched_tags_array), '&lt;TAG MATCH&gt;', '&lt;NO TAG MATCH&gt;') AS IsMatched\n",
+        "       if (search_tag_count = 0 OR (CASE WHEN :tag_search_mode = \"AND\" THEN search_tag_count <= matched_tag_count WHEN :tag_search_mode = \"OR\" THEN matched_tag_count > 0 END), '<TAG MATCH>', '<NO TAG MATCH>') AS IsMatched\n",
         "FROM exploded_usage_tags_to_compare AS spine\n",
         "LEFT JOIN tag_entry_parsing AS tt ON\n",
         "    (CASE WHEN :normalize_case = 'Yes'\n",
@@ -3788,6 +3824,21 @@
               "values": [
                 {
                   "value": "50"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "tag_search_mode",
+          "keyword": "tag_search_mode",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "AND"
                 }
               ]
             }
@@ -5649,7 +5700,7 @@
           },
           "position": {
             "x": 0,
-            "y": 46,
+            "y": 43,
             "width": 6,
             "height": 13
           }
@@ -6340,7 +6391,7 @@
           },
           "position": {
             "x": 0,
-            "y": 31,
+            "y": 28,
             "width": 6,
             "height": 9
           }
@@ -6371,20 +6422,49 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "cd4e3c97",
-                  "disaggregated": true
+                  "datasetName": "6b9e03f6",
+                  "fields": [
+                    {
+                      "name": "monthly(time_key)",
+                      "expression": "DATE_TRUNC(\"MONTH\", `time_key`)"
+                    },
+                    {
+                      "name": "sum(usage_usd)",
+                      "expression": "SUM(`usage_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
                 }
               }
             ],
             "spec": {
               "version": 3,
-              "widgetType": "bar",
-              "encodings": {}
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "monthly(time_key)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "time_key"
+                },
+                "y": {
+                  "fieldName": "sum(usage_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Sum of usage_usd"
+                }
+              },
+              "frame": {
+                "title": "Usage Over Time",
+                "showTitle": true
+              }
             }
           },
           "position": {
             "x": 0,
-            "y": 40,
+            "y": 37,
             "width": 3,
             "height": 6
           }
@@ -6397,19 +6477,23 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "cd4e3c97",
-                  "disaggregated": true
+                  "disaggregated": false
                 }
               }
             ],
             "spec": {
               "version": 3,
               "widgetType": "bar",
-              "encodings": {}
+              "encodings": {},
+              "frame": {
+                "title": "Toggle Distribution",
+                "showTitle": true
+              }
             }
           },
           "position": {
             "x": 2,
-            "y": 59,
+            "y": 56,
             "width": 3,
             "height": 6
           }
@@ -6449,7 +6533,7 @@
           },
           "position": {
             "x": 1,
-            "y": 25,
+            "y": 22,
             "width": 3,
             "height": 6
           }
@@ -7548,7 +7632,7 @@
           "position": {
             "x": 0,
             "y": 4,
-            "width": 2,
+            "width": 4,
             "height": 2
           }
         },
@@ -7646,9 +7730,9 @@
             }
           },
           "position": {
-            "x": 2,
-            "y": 4,
-            "width": 1,
+            "x": 0,
+            "y": 6,
+            "width": 2,
             "height": 2
           }
         },
@@ -7768,7 +7852,7 @@
           },
           "position": {
             "x": 2,
-            "y": 12,
+            "y": 14,
             "width": 4,
             "height": 8
           }
@@ -8227,7 +8311,7 @@
           },
           "position": {
             "x": 0,
-            "y": 30,
+            "y": 32,
             "width": 6,
             "height": 11
           }
@@ -8321,7 +8405,7 @@
           },
           "position": {
             "x": 0,
-            "y": 6,
+            "y": 8,
             "width": 2,
             "height": 6
           }
@@ -8437,7 +8521,7 @@
           },
           "position": {
             "x": 0,
-            "y": 12,
+            "y": 14,
             "width": 2,
             "height": 8
           }
@@ -8540,7 +8624,7 @@
           },
           "position": {
             "x": 0,
-            "y": 20,
+            "y": 22,
             "width": 3,
             "height": 10
           }
@@ -8620,8 +8704,8 @@
             }
           },
           "position": {
-            "x": 3,
-            "y": 4,
+            "x": 2,
+            "y": 6,
             "width": 2,
             "height": 2
           }
@@ -8691,7 +8775,7 @@
           },
           "position": {
             "x": 2,
-            "y": 6,
+            "y": 8,
             "width": 4,
             "height": 6
           }
@@ -8711,7 +8795,7 @@
           },
           "position": {
             "x": 0,
-            "y": 41,
+            "y": 43,
             "width": 6,
             "height": 3
           }
@@ -8775,7 +8859,7 @@
           },
           "position": {
             "x": 2,
-            "y": 44,
+            "y": 46,
             "width": 2,
             "height": 2
           }
@@ -8817,7 +8901,7 @@
           },
           "position": {
             "x": 4,
-            "y": 44,
+            "y": 46,
             "width": 2,
             "height": 2
           }
@@ -8884,7 +8968,7 @@
           },
           "position": {
             "x": 2,
-            "y": 46,
+            "y": 48,
             "width": 4,
             "height": 8
           }
@@ -8958,7 +9042,7 @@
           },
           "position": {
             "x": 3,
-            "y": 54,
+            "y": 56,
             "width": 3,
             "height": 9
           }
@@ -9032,7 +9116,7 @@
           },
           "position": {
             "x": 0,
-            "y": 54,
+            "y": 56,
             "width": 3,
             "height": 9
           }
@@ -9148,9 +9232,9 @@
             }
           },
           "position": {
-            "x": 5,
-            "y": 4,
-            "width": 1,
+            "x": 4,
+            "y": 6,
+            "width": 2,
             "height": 2
           }
         },
@@ -9252,7 +9336,7 @@
           },
           "position": {
             "x": 3,
-            "y": 20,
+            "y": 22,
             "width": 3,
             "height": 10
           }
@@ -9360,9 +9444,109 @@
           },
           "position": {
             "x": 0,
-            "y": 44,
+            "y": 46,
             "width": 2,
             "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "536b12e2",
+            "queries": [
+              {
+                "name": "dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f0959600cf13a9b9bf143966340440_group_key",
+                "query": {
+                  "datasetName": "deb49646",
+                  "fields": [
+                    {
+                      "name": "group_key",
+                      "expression": "`group_key`"
+                    },
+                    {
+                      "name": "group_key_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca308146dbb8e01429de16b79_tag_search_mode",
+                "query": {
+                  "datasetName": "d61a4eeb",
+                  "parameters": [
+                    {
+                      "name": "tag_search_mode",
+                      "keyword": "tag_search_mode"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca3081480b3c4c0bb07992ef6_tag_search_mode",
+                "query": {
+                  "datasetName": "437db86b",
+                  "parameters": [
+                    {
+                      "name": "tag_search_mode",
+                      "keyword": "tag_search_mode"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca30814989978251a01501415_tag_search_mode",
+                "query": {
+                  "datasetName": "450b2674",
+                  "parameters": [
+                    {
+                      "name": "tag_search_mode",
+                      "keyword": "tag_search_mode"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "group_key",
+                    "displayName": "group_key",
+                    "queryName": "dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f0959600cf13a9b9bf143966340440_group_key"
+                  },
+                  {
+                    "parameterName": "tag_search_mode",
+                    "queryName": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca308146dbb8e01429de16b79_tag_search_mode"
+                  },
+                  {
+                    "parameterName": "tag_search_mode",
+                    "queryName": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca3081480b3c4c0bb07992ef6_tag_search_mode"
+                  },
+                  {
+                    "parameterName": "tag_search_mode",
+                    "queryName": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca30814989978251a01501415_tag_search_mode"
+                  }
+                ]
+              },
+              "frame": {
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Search Mode",
+                "description": "Mode when searching multiple tags (AND - all searched tags must be present to match, OR - ANY searched tags can be present)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 4,
+            "width": 2,
+            "height": 2
           }
         }
       ],
@@ -9414,7 +9598,7 @@
           },
           "position": {
             "x": 2,
-            "y": 5,
+            "y": 6,
             "width": 2,
             "height": 2
           }
@@ -9461,7 +9645,7 @@
           },
           "position": {
             "x": 4,
-            "y": 5,
+            "y": 6,
             "width": 2,
             "height": 2
           }
@@ -9505,8 +9689,8 @@
           },
           "position": {
             "x": 0,
-            "y": 3,
-            "width": 1,
+            "y": 2,
+            "width": 2,
             "height": 2
           }
         },
@@ -9567,7 +9751,7 @@
           },
           "position": {
             "x": 0,
-            "y": 5,
+            "y": 6,
             "width": 2,
             "height": 2
           }
@@ -10735,7 +10919,7 @@
           },
           "position": {
             "x": 0,
-            "y": 17,
+            "y": 18,
             "width": 6,
             "height": 20
           }
@@ -10814,7 +10998,7 @@
           },
           "position": {
             "x": 0,
-            "y": 7,
+            "y": 8,
             "width": 6,
             "height": 8
           }
@@ -10903,9 +11087,9 @@
             }
           },
           "position": {
-            "x": 1,
-            "y": 3,
-            "width": 3,
+            "x": 2,
+            "y": 2,
+            "width": 4,
             "height": 2
           }
         },
@@ -11003,9 +11187,9 @@
             }
           },
           "position": {
-            "x": 4,
-            "y": 3,
-            "width": 1,
+            "x": 0,
+            "y": 4,
+            "width": 2,
             "height": 2
           }
         },
@@ -11120,9 +11304,9 @@
             }
           },
           "position": {
-            "x": 5,
-            "y": 3,
-            "width": 1,
+            "x": 4,
+            "y": 4,
+            "width": 2,
             "height": 2
           }
         },
@@ -11137,7 +11321,7 @@
           },
           "position": {
             "x": 0,
-            "y": 15,
+            "y": 16,
             "width": 6,
             "height": 2
           }
@@ -11158,6 +11342,106 @@
             "x": 0,
             "y": 0,
             "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "5ade4b24",
+            "queries": [
+              {
+                "name": "dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f0959600cf13a9b9bf143966340440_group_key",
+                "query": {
+                  "datasetName": "deb49646",
+                  "fields": [
+                    {
+                      "name": "group_key",
+                      "expression": "`group_key`"
+                    },
+                    {
+                      "name": "group_key_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca308146dbb8e01429de16b79_tag_search_mode",
+                "query": {
+                  "datasetName": "d61a4eeb",
+                  "parameters": [
+                    {
+                      "name": "tag_search_mode",
+                      "keyword": "tag_search_mode"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca3081480b3c4c0bb07992ef6_tag_search_mode",
+                "query": {
+                  "datasetName": "437db86b",
+                  "parameters": [
+                    {
+                      "name": "tag_search_mode",
+                      "keyword": "tag_search_mode"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca30814989978251a01501415_tag_search_mode",
+                "query": {
+                  "datasetName": "450b2674",
+                  "parameters": [
+                    {
+                      "name": "tag_search_mode",
+                      "keyword": "tag_search_mode"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "group_key",
+                    "displayName": "group_key",
+                    "queryName": "dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f0959600cf13a9b9bf143966340440_group_key"
+                  },
+                  {
+                    "parameterName": "tag_search_mode",
+                    "queryName": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca308146dbb8e01429de16b79_tag_search_mode"
+                  },
+                  {
+                    "parameterName": "tag_search_mode",
+                    "queryName": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca3081480b3c4c0bb07992ef6_tag_search_mode"
+                  },
+                  {
+                    "parameterName": "tag_search_mode",
+                    "queryName": "parameter_dashboards/01f03fcca3071e66a9244925d8bb6e15/datasets/01f03fcca30814989978251a01501415_tag_search_mode"
+                  }
+                ]
+              },
+              "frame": {
+                "showDescription": true,
+                "showTitle": true,
+                "title": "Search Mode",
+                "description": "Mode when searching multiple tags (AND - all searched tags must be present to match, OR - ANY searched tags can be present)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 4,
+            "width": 2,
             "height": 2
           }
         }
