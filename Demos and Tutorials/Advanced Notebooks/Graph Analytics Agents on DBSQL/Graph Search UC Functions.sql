@@ -284,6 +284,10 @@ CALL main.threat_graph_analytics.pagerank_top_n(10, split('threat-actor,malware'
 
 -- COMMAND ----------
 
+CALL main.threat_graph_analytics.pagerank_top_n(20, split('threat-actor,malware,tool', ','))
+
+-- COMMAND ----------
+
 -- DBTITLE 1,Querying the graph with your functions AND generic Models and Agents
 -- You can query your custom function to do analysis / get node / campaign info, and then pass to AI models or even custom agents you host in model serving!
 WITH results AS (
