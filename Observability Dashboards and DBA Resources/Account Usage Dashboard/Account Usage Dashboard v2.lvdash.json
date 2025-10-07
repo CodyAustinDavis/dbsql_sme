@@ -751,7 +751,7 @@
         "),\n",
         "\n",
         "prices AS (\n",
-        "    SELECT coalesce(price_end_time, date_add(current_date, 1)) AS coalesced_price_end_time, * , 'list' AS price_type\n",
+        "    SELECT coalesce(price_end_time, date_add(current_date, 1)) AS coalesced_price_end_time, * \n",
         "    FROM IDENTIFIER(:price_table)\n",
         "    WHERE currency_code = 'USD' \n",
         "),\n",
@@ -2056,11 +2056,11 @@
         "      -- Dynamic Prices Logic\n",
         "      COALESCE(\n",
         "        -- When there is a * global discounts, then use that for all\n",
-        "        (1-try_cast(regexp_extract(:discounts_by_product, '\\\\s*\\\\*\\\\s*=\\\\s*([0-9]*\\\\.?[0-9]+)', 1) AS decimal(10, 3)))* p.pricing.default * u.usage_quantity,\n",
+        "        (1-try_cast(regexp_extract(:discounts_by_product, '\\\\s*\\\\*\\\\s*=\\\\s*([0-9]*\\\\.?[0-9]+)', 1) AS decimal(10, 3)))* p.pricing.effective_list.default * u.usage_quantity,\n",
         "            -- When no account prices enabled, then use overrides first then default pricing\n",
-        "        (1-COALESCE(discounts.discount, 0))* p.pricing.default * u.usage_quantity,\n",
+        "        (1-COALESCE(discounts.discount, 0))* p.pricing.effective_list.default * u.usage_quantity,\n",
         "        -- When all else fails, use default\n",
-        "        p.pricing.default * u.usage_quantity) as usage_usd,\n",
+        "        p.pricing.effective_list.default * u.usage_quantity) as usage_usd,\n",
         "    usage_quantity AS usage_dbus,\n",
         "    date_trunc('YEAR', usage_date) as usage_year,\n",
         "    date_trunc('QUARTER', usage_date) as usage_quarter,\n",
@@ -5256,7 +5256,34 @@
                 "color": {
                   "fieldName": "group_key",
                   "scale": {
-                    "type": "categorical"
+                    "type": "categorical",
+                    "sort": {
+                      "by": "custom-order",
+                      "orderedValues": [
+                        "VECTOR_SEARCH",
+                        "SQL",
+                        "PREDICTIVE_OPTIMIZATION",
+                        "ONLINE_TABLES",
+                        "NETWORKING",
+                        "MODEL_SERVING",
+                        "LAKEHOUSE_MONITORING",
+                        "LAKEFLOW_CONNECT",
+                        "JOBS",
+                        "INTERACTIVE",
+                        "FOUNDATION_MODEL_TRAINING",
+                        "FINE_GRAINED_ACCESS_CONTROL",
+                        "DLT",
+                        "DATABASE",
+                        "DATA_SHARING",
+                        "DATA_CLASSIFICATION",
+                        "CLEAN_ROOM",
+                        "ALL_PURPOSE",
+                        "AI_RUNTIME",
+                        "AGENT_EVALUATION",
+                        "APPS",
+                        "AI_GATEWAY"
+                      ]
+                    }
                   },
                   "legend": {
                     "hideTitle": true,
@@ -5700,7 +5727,7 @@
           },
           "position": {
             "x": 0,
-            "y": 43,
+            "y": 31,
             "width": 6,
             "height": 13
           }
@@ -6391,7 +6418,7 @@
           },
           "position": {
             "x": 0,
-            "y": 28,
+            "y": 22,
             "width": 6,
             "height": 9
           }
@@ -6413,129 +6440,6 @@
             "y": 0,
             "width": 6,
             "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "532fb898",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "6b9e03f6",
-                  "fields": [
-                    {
-                      "name": "monthly(time_key)",
-                      "expression": "DATE_TRUNC(\"MONTH\", `time_key`)"
-                    },
-                    {
-                      "name": "sum(usage_usd)",
-                      "expression": "SUM(`usage_usd`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "line",
-              "encodings": {
-                "x": {
-                  "fieldName": "monthly(time_key)",
-                  "scale": {
-                    "type": "temporal"
-                  },
-                  "displayName": "time_key"
-                },
-                "y": {
-                  "fieldName": "sum(usage_usd)",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "Sum of usage_usd"
-                }
-              },
-              "frame": {
-                "title": "Usage Over Time",
-                "showTitle": true
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 37,
-            "width": 3,
-            "height": 6
-          }
-        },
-        {
-          "widget": {
-            "name": "cafe2790",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "cd4e3c97",
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {},
-              "frame": {
-                "title": "Toggle Distribution",
-                "showTitle": true
-              }
-            }
-          },
-          "position": {
-            "x": 2,
-            "y": 56,
-            "width": 3,
-            "height": 6
-          }
-        },
-        {
-          "widget": {
-            "name": "f216b398",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "cd4e3c97",
-                  "fields": [
-                    {
-                      "name": "count(toggle)",
-                      "expression": "COUNT(`toggle`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "count(toggle)",
-                  "displayName": "Count of toggle"
-                }
-              },
-              "frame": {
-                "title": "Toggle Counter",
-                "showTitle": true
-              }
-            }
-          },
-          "position": {
-            "x": 1,
-            "y": 22,
-            "width": 3,
-            "height": 6
           }
         }
       ],
@@ -6891,8 +6795,7 @@
                     "allowHTML": true,
                     "highlightLinks": false,
                     "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "group_key"
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "usage_bar_html",
@@ -6918,8 +6821,7 @@
                     "allowHTML": true,
                     "highlightLinks": false,
                     "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "usage_bar_html"
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "Current period",
@@ -6946,8 +6848,7 @@
                     "allowHTML": true,
                     "highlightLinks": false,
                     "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "Current period"
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "Last period",
@@ -6974,8 +6875,7 @@
                     "allowHTML": true,
                     "highlightLinks": false,
                     "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "Last period"
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "2 periods ago",
@@ -7002,8 +6902,7 @@
                     "allowHTML": true,
                     "highlightLinks": false,
                     "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "2 periods ago"
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "3 periods ago",
@@ -7030,8 +6929,7 @@
                     "allowHTML": true,
                     "highlightLinks": false,
                     "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "3 periods ago"
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "4 periods ago",
@@ -7058,8 +6956,7 @@
                     "allowHTML": true,
                     "highlightLinks": false,
                     "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "4 periods ago"
+                    "preserveWhitespace": false
                   },
                   {
                     "fieldName": "5 periods ago",
@@ -7086,8 +6983,7 @@
                     "allowHTML": true,
                     "highlightLinks": false,
                     "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "displayName": "5 periods ago"
+                    "preserveWhitespace": false
                   }
                 ]
               },
@@ -13024,6 +12920,25 @@
             "width": 1,
             "height": 2
           }
+        },
+        {
+          "widget": {
+            "name": "7e889f0f",
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {},
+              "frame": {
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 1,
+            "height": 2
+          }
         }
       ],
       "pageType": "PAGE_TYPE_GLOBAL_FILTERS"
@@ -13064,6 +12979,9 @@
         "#BF7080"
       ],
       "widgetHeaderAlignment": "LEFT"
+    },
+    "genieSpace": {
+      "isEnabled": false
     }
   }
 }
