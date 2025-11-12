@@ -450,8 +450,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -759,8 +759,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -1232,8 +1232,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -1727,8 +1727,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -2069,8 +2069,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -2540,8 +2540,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -3218,8 +3218,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -3951,8 +3951,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -4305,8 +4305,8 @@
         "prices as (\n",
         "  select coalesce(price_end_time, date_add(current_date, 1)) as coalesced_price_end_time, \n",
         "  sku_name, usage_unit, price_start_time,\n",
-        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'double')\n",
-        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'double')\n",
+        "  CASE WHEN :price_table = 'system.billing.list_prices' THEN try_variant_get(to_variant_object(pricing), '$.effective_list.default', 'decimal(38,18)')\n",
+        "       WHEN :price_table = 'system.billing.account_prices' THEN try_variant_get(to_variant_object(pricing), '$.default', 'decimal(38,18)')\n",
         "      END AS unit_px\n",
         "  from IDENTIFIER(:price_table)\n",
         "  WHERE\n",
@@ -5395,22 +5395,6 @@
                     {
                       "name": "5 periods ago",
                       "expression": "`5 periods ago`"
-                    },
-                    {
-                      "name": "_all_time_usage_usd",
-                      "expression": "`_all_time_usage_usd`"
-                    },
-                    {
-                      "name": "_order",
-                      "expression": "`_order`"
-                    },
-                    {
-                      "name": "max_usage",
-                      "expression": "`max_usage`"
-                    },
-                    {
-                      "name": "min_usage",
-                      "expression": "`min_usage`"
                     }
                   ],
                   "disaggregated": true
@@ -5663,118 +5647,115 @@
                     "highlightLinks": false,
                     "useMonospaceFont": false,
                     "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "_all_time_usage_usd",
-                    "numberFormat": "0.00",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "float",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 9,
-                    "title": "_all_time_usage_usd",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "_order",
-                    "numberFormat": "0",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "integer",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 10,
-                    "title": "_order",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "max_usage",
-                    "numberFormat": "0.00",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "float",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 11,
-                    "title": "max_usage",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "min_usage",
-                    "numberFormat": "0.00",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "float",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 12,
-                    "title": "min_usage",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
                   }
                 ]
               },
-              "invisibleColumns": [],
+              "invisibleColumns": [
+                {
+                  "numberFormat": "0.00",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "_all_time_usage_usd",
+                  "type": "float",
+                  "displayAs": "number",
+                  "order": 9,
+                  "title": "_all_time_usage_usd",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "_order",
+                  "type": "integer",
+                  "displayAs": "number",
+                  "order": 10,
+                  "title": "_order",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0.00",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "max_usage",
+                  "type": "float",
+                  "displayAs": "number",
+                  "order": 11,
+                  "title": "max_usage",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0.00",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "min_usage",
+                  "type": "float",
+                  "displayAs": "number",
+                  "order": 12,
+                  "title": "min_usage",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                }
+              ],
               "allowHTMLByDefault": false,
               "itemsPerPage": 20,
               "paginationSize": "default",
@@ -12982,25 +12963,6 @@
             "width": 1,
             "height": 2
           }
-        },
-        {
-          "widget": {
-            "name": "7e889f0f",
-            "spec": {
-              "version": 2,
-              "widgetType": "filter-single-select",
-              "encodings": {},
-              "frame": {
-                "showTitle": true
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 20,
-            "width": 1,
-            "height": 2
-          }
         }
       ],
       "pageType": "PAGE_TYPE_GLOBAL_FILTERS"
@@ -13044,6 +13006,7 @@
     },
     "genieSpace": {
       "isEnabled": false
-    }
+    },
+    "applyModeEnabled": false
   }
 }
