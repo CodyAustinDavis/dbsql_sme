@@ -2108,7 +2108,8 @@
         "LEFT JOIN warehouse_snapshot w\n",
         "  ON u.warehouse_id = w.warehouse_id\n",
         " AND u.workspace_id = w.workspace_id\n",
-        " WHERE u.on_seconds > 0"
+        " WHERE u.on_seconds > 0\n",
+        " AND w.auto_stop_minutes > 10\n",
         " ORDER BY utilization_proportion DESC;\n"
       ],
       "parameters": [
