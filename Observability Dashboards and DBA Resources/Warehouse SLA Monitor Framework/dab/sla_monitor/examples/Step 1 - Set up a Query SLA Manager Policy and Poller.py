@@ -1,5 +1,6 @@
 # Databricks notebook source
-from query_sla_manager import QueryHistoryAlertManager
+
+# MAGIC %run ../src/query_sla_manager
 
 # COMMAND ----------
 

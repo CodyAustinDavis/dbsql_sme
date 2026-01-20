@@ -1,0 +1,25 @@
+# The main job for sla_monitor.
+resources:
+  jobs:
+    sla_monitor_job:
+      name: Warehouse_SLA_Monitor_Job
+
+      trigger:
+        periodic:
+          interval: 1
+          unit: DAYS
+
+      tasks:
+        - task_key: Poll_Query_History
+          job_cluster_key: warehouse_sla_monitor_cluster
+          notebook_task:
+            notebook_path: /Workspace/Users/${workspace.current_user.userName}/Warehouse_SLA_Monitoring/files/src/warehouse_sla_poller
+        
+      job_clusters:
+        - job_cluster_key: warehouse_sla_monitor_cluster
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: i3.xlarge
+            autoscale:
+                min_workers: 1
+                max_workers: 2

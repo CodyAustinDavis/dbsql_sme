@@ -1,0 +1,18 @@
+# Databricks special files
+.databricks/
+
+# Python things
+build/
+dist/
+__pycache__/
+*.egg-info
+.venv/
+scratch/**
+!scratch/README.md
+
+# MacOS things
+.DS_Store
+**/.DS_Store
+
+# VS Code
+.vscode/
