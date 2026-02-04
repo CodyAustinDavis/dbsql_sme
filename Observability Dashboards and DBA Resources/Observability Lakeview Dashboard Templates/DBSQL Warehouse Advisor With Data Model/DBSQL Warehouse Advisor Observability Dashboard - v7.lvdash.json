@@ -4443,7 +4443,7 @@
               "frame": {
                 "showTitle": true,
                 "showDescription": true,
-                "title": "Warehouse Current Snapshot",
+                "title": "Warehouse Snapshot (low utilization and not minimum autostop)",
                 "description": "Lastest utilization & settings of each warehouse"
               }
             }
