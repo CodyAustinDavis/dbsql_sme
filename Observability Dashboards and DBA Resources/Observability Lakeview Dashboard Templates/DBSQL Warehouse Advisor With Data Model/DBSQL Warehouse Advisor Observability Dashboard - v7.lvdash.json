@@ -410,7 +410,7 @@
               "dataType": "DECIMAL",
               "values": [
                 {
-                  "value": "120"
+                  "value": "12"
                 }
               ]
             }
@@ -603,7 +603,9 @@
           "description": "",
           "expression": "try_divide(COUNT(statement_id), MAX(total_window_minutes))"
         }
-      ]
+      ],
+      "catalog": "stephanie",
+      "schema": "dbsql_warehouse_advisor"
     },
     {
       "name": "871b75c8",
@@ -3427,6 +3429,1153 @@
       "pageType": "PAGE_TYPE_CANVAS"
     },
     {
+      "name": "14197eb8",
+      "displayName": "Warehouse Scaling Patterns",
+      "layout": [
+        {
+          "widget": {
+            "name": "fbc8b838",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Warehouse Scaling & Utilization Trends\n",
+                "-----\n",
+                "This section simplifies trying to understand how well your warehouse scales as well as helps users project long term costs of spiky workloads more accurately. It pivots the real-time concurrency scaling chart and shows generally how much time and what % of time the warehouse was scaled up to each concurrency level. This can help guage scaling efficiency over time in production as well. \n",
+                "\n",
+                "Note: The warehouse settings (size, auto stop, min, and max clusters) represent the snapshot of the configuration of the warehouse at the select end time in that selected window. "
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "45939b84",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e139c435",
+                  "fields": [
+                    {
+                      "name": "NumberOfClustersOn",
+                      "expression": "`NumberOfClustersOn`"
+                    },
+                    {
+                      "name": "time_key",
+                      "expression": "`time_key`"
+                    },
+                    {
+                      "name": "sum(total_minutes)",
+                      "expression": "SUM(`total_minutes`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "time_key",
+                  "displayName": "# Clusters",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_minutes)",
+                  "displayName": "# Minutes On Cluster N",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "NumberOfClustersOn",
+                  "displayName": "Time",
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "scheme",
+                      "scheme": "greenblue"
+                    }
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Warehouse Scaling Summary Over Time"
+              },
+              "mark": {
+                "layout": "percent-stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 28,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "2bd52353",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "12744d7e",
+                  "fields": [
+                    {
+                      "name": "utilization_flag",
+                      "expression": "`utilization_flag`"
+                    },
+                    {
+                      "name": "time_key",
+                      "expression": "`time_key`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "time_key",
+                  "axis": {
+                    "title": "Time"
+                  },
+                  "displayName": "# Concurrent Clusters",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(*)",
+                  "axis": {
+                    "title": "% time spent"
+                  },
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  },
+                  "displayName": "# Minutes On Cluster N",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "utilization_flag",
+                  "legend": {
+                    "position": "bottom"
+                  },
+                  "displayName": "Is Warehouse Utilized?",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "OFF",
+                        "color": "#077A9D"
+                      },
+                      {
+                        "value": "ON_IDLE",
+                        "color": "#919191"
+                      },
+                      {
+                        "value": "UTILIZED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 3
+                        }
+                      }
+                    ]
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Warehouse Utilization Over Time",
+                "showDescription": false,
+                "description": ""
+              },
+              "mark": {
+                "layout": "percent-stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 36,
+            "width": 6,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "cbb19029",
+            "queries": [
+              {
+                "name": "dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01efed783dd61b9ab041fc65e1ee3c62_time_key",
+                "query": {
+                  "datasetName": "6d9636e5",
+                  "fields": [
+                    {
+                      "name": "time_key",
+                      "expression": "`time_key`"
+                    },
+                    {
+                      "name": "time_key_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01ef706137bd1bf8a5372de6a5de3cc5_param_time_key",
+                "query": {
+                  "datasetName": "36bb7aba",
+                  "parameters": [
+                    {
+                      "name": "param_time_key",
+                      "keyword": "param_time_key"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01ef85b7273b1a0088f37ab14f1e2133_param_time_key",
+                "query": {
+                  "datasetName": "e139c435",
+                  "parameters": [
+                    {
+                      "name": "param_time_key",
+                      "keyword": "param_time_key"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01efaab24e431458b8b82786e560d412_param_time_key",
+                "query": {
+                  "datasetName": "12744d7e",
+                  "parameters": [
+                    {
+                      "name": "param_time_key",
+                      "keyword": "param_time_key"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "time_key",
+                    "displayName": "time_key",
+                    "queryName": "dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01efed783dd61b9ab041fc65e1ee3c62_time_key"
+                  },
+                  {
+                    "parameterName": "param_time_key",
+                    "queryName": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01ef706137bd1bf8a5372de6a5de3cc5_param_time_key"
+                  },
+                  {
+                    "parameterName": "param_time_key",
+                    "queryName": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01ef85b7273b1a0088f37ab14f1e2133_param_time_key"
+                  },
+                  {
+                    "parameterName": "param_time_key",
+                    "queryName": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01efaab24e431458b8b82786e560d412_param_time_key"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "Day"
+                      }
+                    ]
+                  }
+                }
+              },
+              "disallowAll": true,
+              "frame": {
+                "showTitle": true,
+                "title": "Time Grain"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 19,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "78aa378b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "36bb7aba",
+                  "fields": [
+                    {
+                      "name": "event_minute",
+                      "expression": "`event_minute`"
+                    },
+                    {
+                      "name": "max(NumberOfClustersOn)",
+                      "expression": "MAX(`NumberOfClustersOn`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "event_minute",
+                  "displayName": "Time",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "max(NumberOfClustersOn)",
+                  "displayName": "# Minutes On Cluster N",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Warehouse Scaling Pattern Histogram"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "ba467a67",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "360d3786",
+                  "fields": [
+                    {
+                      "name": "NumberOfClustersOn",
+                      "expression": "`NumberOfClustersOn`"
+                    },
+                    {
+                      "name": "sum(minutes_at_clusters)",
+                      "expression": "SUM(`minutes_at_clusters`)"
+                    },
+                    {
+                      "name": "warehouse_name",
+                      "expression": "`warehouse_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(minutes_at_clusters)",
+                  "displayName": "Time Scaled at Cluster N",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "warehouse_name",
+                  "displayName": "Warehouse",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "color": {
+                  "fieldName": "NumberOfClustersOn",
+                  "displayName": "# Clusters",
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "scheme",
+                      "scheme": "greenblue"
+                    }
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Warehouse Scaling Pattern Histogram"
+              },
+              "mark": {
+                "layout": "percent-stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "warehouse-current-snapshot",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "94dbe86a",
+                  "fields": [
+                    {
+                      "name": "warehouse_name",
+                      "expression": "`warehouse_name`"
+                    },
+                    {
+                      "name": "utilization_proportion",
+                      "expression": "`utilization_proportion`"
+                    },
+                    {
+                      "name": "warehouse_type",
+                      "expression": "`warehouse_type`"
+                    },
+                    {
+                      "name": "warehouse_size",
+                      "expression": "`warehouse_size`"
+                    },
+                    {
+                      "name": "min_clusters",
+                      "expression": "`min_clusters`"
+                    },
+                    {
+                      "name": "max_clusters",
+                      "expression": "`max_clusters`"
+                    },
+                    {
+                      "name": "auto_stop_minutes",
+                      "expression": "`auto_stop_minutes`"
+                    },
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`is_deleted` IS NULL OR `is_deleted` NOT IN ('Deleted')"
+                    },
+                    {
+                      "expression": "IN_RANGE(`auto_stop_minutes`, 11, NULL)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "warehouse_name",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Warehouse",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "defaultColumnWidth": 200
+                  },
+                  {
+                    "fieldName": "utilization_proportion",
+                    "numberFormat": "%0",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Utilization %",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "scalePercentBy100": true,
+                    "cellFormat": {
+                      "default": {
+                        "foregroundColor": null
+                      },
+                      "rules": [
+                        {
+                          "if": {
+                            "column": "utilization_proportion",
+                            "fn": "<",
+                            "literal": "0.2"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 6
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "utilization_proportion",
+                            "fn": "<=",
+                            "literal": "0.5"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 2
+                            }
+                          }
+                        },
+                        {
+                          "if": {
+                            "column": "utilization_proportion",
+                            "fn": ">",
+                            "literal": "0.5"
+                          },
+                          "value": {
+                            "foregroundColor": {
+                              "themeColorType": "visualizationColors",
+                              "position": 3
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "warehouse_type",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Type",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  },
+                  {
+                    "fieldName": "warehouse_size",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "Size",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "defaultColumnWidth": 100
+                  },
+                  {
+                    "fieldName": "min_clusters",
+                    "numberFormat": "0",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 5,
+                    "title": "Min Clusters",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "defaultColumnWidth": 120
+                  },
+                  {
+                    "fieldName": "max_clusters",
+                    "numberFormat": "0",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 6,
+                    "title": "Max Clusters",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "defaultColumnWidth": 130
+                  },
+                  {
+                    "fieldName": "auto_stop_minutes",
+                    "numberFormat": "0",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 7,
+                    "title": "Auto Stop (mins)",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "defaultColumnWidth": 150
+                  },
+                  {
+                    "fieldName": "workspace_id",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 9,
+                    "title": "Workspace Id",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false
+                  }
+                ]
+              },
+              "invisibleColumns": [
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "warehouse_id",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 0,
+                  "title": "warehouse_id",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "warehouse_channel",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 8,
+                  "title": "Channel",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "dateTimeFormat": "DD/MM/YYYY HH:mm:ss.SSS",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "change_time",
+                  "type": "datetime",
+                  "displayAs": "datetime",
+                  "order": 10,
+                  "title": "change_time",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "dateTimeFormat": "DD/MM/YYYY HH:mm:ss.SSS",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "delete_time",
+                  "type": "datetime",
+                  "displayAs": "datetime",
+                  "order": 11,
+                  "title": "delete_time",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "is_deleted",
+                  "type": "string",
+                  "displayAs": "string",
+                  "order": 12,
+                  "title": "State",
+                  "allowSearch": false,
+                  "alignContent": "left",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "utilized_seconds",
+                  "type": "integer",
+                  "displayAs": "number",
+                  "order": 13,
+                  "title": "utilized_seconds",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "idle_seconds",
+                  "type": "integer",
+                  "displayAs": "number",
+                  "order": 14,
+                  "title": "idle_seconds",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "total_seconds",
+                  "type": "integer",
+                  "displayAs": "number",
+                  "order": 15,
+                  "title": "total_seconds",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                },
+                {
+                  "numberFormat": "0",
+                  "booleanValues": [
+                    "false",
+                    "true"
+                  ],
+                  "imageUrlTemplate": "{{ @ }}",
+                  "imageTitleTemplate": "{{ @ }}",
+                  "imageWidth": "",
+                  "imageHeight": "",
+                  "linkUrlTemplate": "{{ @ }}",
+                  "linkTextTemplate": "{{ @ }}",
+                  "linkTitleTemplate": "{{ @ }}",
+                  "linkOpenInNewTab": true,
+                  "name": "on_seconds",
+                  "type": "integer",
+                  "displayAs": "number",
+                  "order": 16,
+                  "title": "on_seconds",
+                  "allowSearch": false,
+                  "alignContent": "right",
+                  "allowHTML": false,
+                  "highlightLinks": false,
+                  "useMonospaceFont": false,
+                  "preserveWhitespace": false
+                }
+              ],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "Warehouse Snapshot (low utilization and not minimum autostop)",
+                "description": "Lastest utilization & settings of each warehouse"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "93f2c698",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Single Warehouse Drilldown\n",
+                "\n",
+                "----\n",
+                "\n",
+                "This tab allows users to select a single warehouse to dig into more detailed metrics like utilization over time and scaling over time"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "selected-warehouse-drilldown",
+            "queries": [
+              {
+                "name": "dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b1309a54fc5831b037c61_warehouse_name",
+                "query": {
+                  "datasetName": "304214bb",
+                  "fields": [
+                    {
+                      "name": "warehouse_name",
+                      "expression": "`warehouse_name`"
+                    },
+                    {
+                      "name": "warehouse_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b1362bb66142761a0d485_warehouse_name",
+                "query": {
+                  "datasetName": "36bb7aba",
+                  "parameters": [
+                    {
+                      "name": "warehouse_name",
+                      "keyword": "warehouse_name"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b13cd8e57bb65b056cb54_warehouse_name",
+                "query": {
+                  "datasetName": "12744d7e",
+                  "parameters": [
+                    {
+                      "name": "warehouse_name",
+                      "keyword": "warehouse_name"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b13b0ad50690c548f7b6e_warehouse_name",
+                "query": {
+                  "datasetName": "e139c435",
+                  "parameters": [
+                    {
+                      "name": "warehouse_name",
+                      "keyword": "warehouse_name"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "warehouse_name",
+                    "queryName": "dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b1309a54fc5831b037c61_warehouse_name"
+                  },
+                  {
+                    "parameterName": "warehouse_name",
+                    "queryName": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b1362bb66142761a0d485_warehouse_name"
+                  },
+                  {
+                    "parameterName": "warehouse_name",
+                    "queryName": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b13cd8e57bb65b056cb54_warehouse_name"
+                  },
+                  {
+                    "parameterName": "warehouse_name",
+                    "queryName": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b13b0ad50690c548f7b6e_warehouse_name"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Selected Warehouse (Drilldown)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
       "name": "ac79703d",
       "displayName": "Warehouse Usage Summary",
       "layout": [
@@ -5861,1153 +7010,6 @@
             "x": 2,
             "y": 4,
             "width": 2,
-            "height": 2
-          }
-        }
-      ],
-      "pageType": "PAGE_TYPE_CANVAS"
-    },
-    {
-      "name": "14197eb8",
-      "displayName": "Warehouse Scaling Patterns",
-      "layout": [
-        {
-          "widget": {
-            "name": "fbc8b838",
-            "multilineTextboxSpec": {
-              "lines": [
-                "# Warehouse Scaling & Utilization Trends\n",
-                "-----\n",
-                "This section simplifies trying to understand how well your warehouse scales as well as helps users project long term costs of spiky workloads more accurately. It pivots the real-time concurrency scaling chart and shows generally how much time and what % of time the warehouse was scaled up to each concurrency level. This can help guage scaling efficiency over time in production as well. \n",
-                "\n",
-                "Note: The warehouse settings (size, auto stop, min, and max clusters) represent the snapshot of the configuration of the warehouse at the select end time in that selected window. "
-              ]
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 0,
-            "width": 6,
-            "height": 4
-          }
-        },
-        {
-          "widget": {
-            "name": "45939b84",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "e139c435",
-                  "fields": [
-                    {
-                      "name": "NumberOfClustersOn",
-                      "expression": "`NumberOfClustersOn`"
-                    },
-                    {
-                      "name": "time_key",
-                      "expression": "`time_key`"
-                    },
-                    {
-                      "name": "sum(total_minutes)",
-                      "expression": "SUM(`total_minutes`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "time_key",
-                  "displayName": "# Clusters",
-                  "scale": {
-                    "type": "temporal"
-                  }
-                },
-                "y": {
-                  "fieldName": "sum(total_minutes)",
-                  "displayName": "# Minutes On Cluster N",
-                  "scale": {
-                    "type": "quantitative"
-                  }
-                },
-                "color": {
-                  "fieldName": "NumberOfClustersOn",
-                  "displayName": "Time",
-                  "scale": {
-                    "type": "quantitative",
-                    "colorRamp": {
-                      "mode": "scheme",
-                      "scheme": "greenblue"
-                    }
-                  }
-                },
-                "label": {
-                  "show": true
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Warehouse Scaling Summary Over Time"
-              },
-              "mark": {
-                "layout": "percent-stack"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 28,
-            "width": 6,
-            "height": 8
-          }
-        },
-        {
-          "widget": {
-            "name": "2bd52353",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "12744d7e",
-                  "fields": [
-                    {
-                      "name": "utilization_flag",
-                      "expression": "`utilization_flag`"
-                    },
-                    {
-                      "name": "time_key",
-                      "expression": "`time_key`"
-                    },
-                    {
-                      "name": "count(*)",
-                      "expression": "COUNT(`*`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "time_key",
-                  "axis": {
-                    "title": "Time"
-                  },
-                  "displayName": "# Concurrent Clusters",
-                  "scale": {
-                    "type": "temporal"
-                  }
-                },
-                "y": {
-                  "fieldName": "count(*)",
-                  "axis": {
-                    "title": "% time spent"
-                  },
-                  "format": {
-                    "type": "number-plain",
-                    "abbreviation": "compact",
-                    "decimalPlaces": {
-                      "type": "max",
-                      "places": 2
-                    }
-                  },
-                  "displayName": "# Minutes On Cluster N",
-                  "scale": {
-                    "type": "quantitative"
-                  }
-                },
-                "color": {
-                  "fieldName": "utilization_flag",
-                  "legend": {
-                    "position": "bottom"
-                  },
-                  "displayName": "Is Warehouse Utilized?",
-                  "scale": {
-                    "type": "categorical",
-                    "mappings": [
-                      {
-                        "value": "OFF",
-                        "color": "#077A9D"
-                      },
-                      {
-                        "value": "ON_IDLE",
-                        "color": "#919191"
-                      },
-                      {
-                        "value": "UTILIZED",
-                        "color": {
-                          "themeColorType": "visualizationColors",
-                          "position": 3
-                        }
-                      }
-                    ]
-                  }
-                },
-                "label": {
-                  "show": true
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Warehouse Utilization Over Time",
-                "showDescription": false,
-                "description": ""
-              },
-              "mark": {
-                "layout": "percent-stack"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 36,
-            "width": 6,
-            "height": 10
-          }
-        },
-        {
-          "widget": {
-            "name": "cbb19029",
-            "queries": [
-              {
-                "name": "dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01efed783dd61b9ab041fc65e1ee3c62_time_key",
-                "query": {
-                  "datasetName": "6d9636e5",
-                  "fields": [
-                    {
-                      "name": "time_key",
-                      "expression": "`time_key`"
-                    },
-                    {
-                      "name": "time_key_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01ef706137bd1bf8a5372de6a5de3cc5_param_time_key",
-                "query": {
-                  "datasetName": "36bb7aba",
-                  "parameters": [
-                    {
-                      "name": "param_time_key",
-                      "keyword": "param_time_key"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01ef85b7273b1a0088f37ab14f1e2133_param_time_key",
-                "query": {
-                  "datasetName": "e139c435",
-                  "parameters": [
-                    {
-                      "name": "param_time_key",
-                      "keyword": "param_time_key"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01efaab24e431458b8b82786e560d412_param_time_key",
-                "query": {
-                  "datasetName": "12744d7e",
-                  "parameters": [
-                    {
-                      "name": "param_time_key",
-                      "keyword": "param_time_key"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "widgetType": "filter-single-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "fieldName": "time_key",
-                    "displayName": "time_key",
-                    "queryName": "dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01efed783dd61b9ab041fc65e1ee3c62_time_key"
-                  },
-                  {
-                    "parameterName": "param_time_key",
-                    "queryName": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01ef706137bd1bf8a5372de6a5de3cc5_param_time_key"
-                  },
-                  {
-                    "parameterName": "param_time_key",
-                    "queryName": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01ef85b7273b1a0088f37ab14f1e2133_param_time_key"
-                  },
-                  {
-                    "parameterName": "param_time_key",
-                    "queryName": "parameter_dashboards/01ef706137b51396ae0e5e660ffae393/datasets/01efaab24e431458b8b82786e560d412_param_time_key"
-                  }
-                ]
-              },
-              "selection": {
-                "defaultSelection": {
-                  "values": {
-                    "dataType": "STRING",
-                    "values": [
-                      {
-                        "value": "Day"
-                      }
-                    ]
-                  }
-                }
-              },
-              "disallowAll": true,
-              "frame": {
-                "showTitle": true,
-                "title": "Time Grain"
-              }
-            }
-          },
-          "position": {
-            "x": 4,
-            "y": 19,
-            "width": 2,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "78aa378b",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "36bb7aba",
-                  "fields": [
-                    {
-                      "name": "event_minute",
-                      "expression": "`event_minute`"
-                    },
-                    {
-                      "name": "max(NumberOfClustersOn)",
-                      "expression": "MAX(`NumberOfClustersOn`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "line",
-              "encodings": {
-                "x": {
-                  "fieldName": "event_minute",
-                  "displayName": "Time",
-                  "scale": {
-                    "type": "temporal"
-                  }
-                },
-                "y": {
-                  "fieldName": "max(NumberOfClustersOn)",
-                  "displayName": "# Minutes On Cluster N",
-                  "scale": {
-                    "type": "quantitative"
-                  }
-                },
-                "label": {
-                  "show": false
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Warehouse Scaling Pattern Histogram"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 21,
-            "width": 6,
-            "height": 7
-          }
-        },
-        {
-          "widget": {
-            "name": "ba467a67",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "360d3786",
-                  "fields": [
-                    {
-                      "name": "NumberOfClustersOn",
-                      "expression": "`NumberOfClustersOn`"
-                    },
-                    {
-                      "name": "sum(minutes_at_clusters)",
-                      "expression": "SUM(`minutes_at_clusters`)"
-                    },
-                    {
-                      "name": "warehouse_name",
-                      "expression": "`warehouse_name`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "sum(minutes_at_clusters)",
-                  "displayName": "Time Scaled at Cluster N",
-                  "scale": {
-                    "type": "quantitative"
-                  }
-                },
-                "y": {
-                  "fieldName": "warehouse_name",
-                  "displayName": "Warehouse",
-                  "scale": {
-                    "type": "categorical"
-                  }
-                },
-                "color": {
-                  "fieldName": "NumberOfClustersOn",
-                  "displayName": "# Clusters",
-                  "scale": {
-                    "type": "quantitative",
-                    "colorRamp": {
-                      "mode": "scheme",
-                      "scheme": "greenblue"
-                    }
-                  }
-                },
-                "label": {
-                  "show": true
-                }
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Warehouse Scaling Pattern Histogram"
-              },
-              "mark": {
-                "layout": "percent-stack"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 9,
-            "width": 6,
-            "height": 8
-          }
-        },
-        {
-          "widget": {
-            "name": "warehouse-current-snapshot",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "94dbe86a",
-                  "fields": [
-                    {
-                      "name": "warehouse_name",
-                      "expression": "`warehouse_name`"
-                    },
-                    {
-                      "name": "utilization_proportion",
-                      "expression": "`utilization_proportion`"
-                    },
-                    {
-                      "name": "warehouse_type",
-                      "expression": "`warehouse_type`"
-                    },
-                    {
-                      "name": "warehouse_size",
-                      "expression": "`warehouse_size`"
-                    },
-                    {
-                      "name": "min_clusters",
-                      "expression": "`min_clusters`"
-                    },
-                    {
-                      "name": "max_clusters",
-                      "expression": "`max_clusters`"
-                    },
-                    {
-                      "name": "auto_stop_minutes",
-                      "expression": "`auto_stop_minutes`"
-                    },
-                    {
-                      "name": "workspace_id",
-                      "expression": "`workspace_id`"
-                    }
-                  ],
-                  "filters": [
-                    {
-                      "expression": "`is_deleted` IS NULL OR `is_deleted` NOT IN ('Deleted')"
-                    },
-                    {
-                      "expression": "IN_RANGE(`auto_stop_minutes`, 11, NULL)"
-                    }
-                  ],
-                  "disaggregated": true
-                }
-              }
-            ],
-            "spec": {
-              "version": 1,
-              "widgetType": "table",
-              "encodings": {
-                "columns": [
-                  {
-                    "fieldName": "warehouse_name",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 1,
-                    "title": "Warehouse",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "defaultColumnWidth": 200
-                  },
-                  {
-                    "fieldName": "utilization_proportion",
-                    "numberFormat": "%0",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "float",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 2,
-                    "title": "Utilization %",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "scalePercentBy100": true,
-                    "cellFormat": {
-                      "default": {
-                        "foregroundColor": null
-                      },
-                      "rules": [
-                        {
-                          "if": {
-                            "column": "utilization_proportion",
-                            "fn": "<",
-                            "literal": "0.2"
-                          },
-                          "value": {
-                            "foregroundColor": {
-                              "themeColorType": "visualizationColors",
-                              "position": 6
-                            }
-                          }
-                        },
-                        {
-                          "if": {
-                            "column": "utilization_proportion",
-                            "fn": "<=",
-                            "literal": "0.5"
-                          },
-                          "value": {
-                            "foregroundColor": {
-                              "themeColorType": "visualizationColors",
-                              "position": 2
-                            }
-                          }
-                        },
-                        {
-                          "if": {
-                            "column": "utilization_proportion",
-                            "fn": ">",
-                            "literal": "0.5"
-                          },
-                          "value": {
-                            "foregroundColor": {
-                              "themeColorType": "visualizationColors",
-                              "position": 3
-                            }
-                          }
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "fieldName": "warehouse_type",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 3,
-                    "title": "Type",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  },
-                  {
-                    "fieldName": "warehouse_size",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 4,
-                    "title": "Size",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "defaultColumnWidth": 100
-                  },
-                  {
-                    "fieldName": "min_clusters",
-                    "numberFormat": "0",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "integer",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 5,
-                    "title": "Min Clusters",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "defaultColumnWidth": 120
-                  },
-                  {
-                    "fieldName": "max_clusters",
-                    "numberFormat": "0",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "integer",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 6,
-                    "title": "Max Clusters",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "defaultColumnWidth": 130
-                  },
-                  {
-                    "fieldName": "auto_stop_minutes",
-                    "numberFormat": "0",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "integer",
-                    "displayAs": "number",
-                    "visible": true,
-                    "order": 7,
-                    "title": "Auto Stop (mins)",
-                    "allowSearch": false,
-                    "alignContent": "right",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "defaultColumnWidth": 150
-                  },
-                  {
-                    "fieldName": "workspace_id",
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "type": "string",
-                    "displayAs": "string",
-                    "visible": true,
-                    "order": 9,
-                    "title": "Workspace Id",
-                    "allowSearch": false,
-                    "alignContent": "left",
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false
-                  }
-                ]
-              },
-              "invisibleColumns": [
-                {
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "warehouse_id",
-                  "type": "string",
-                  "displayAs": "string",
-                  "order": 0,
-                  "title": "warehouse_id",
-                  "allowSearch": false,
-                  "alignContent": "left",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "warehouse_channel",
-                  "type": "string",
-                  "displayAs": "string",
-                  "order": 8,
-                  "title": "Channel",
-                  "allowSearch": false,
-                  "alignContent": "left",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "dateTimeFormat": "DD/MM/YYYY HH:mm:ss.SSS",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "change_time",
-                  "type": "datetime",
-                  "displayAs": "datetime",
-                  "order": 10,
-                  "title": "change_time",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "dateTimeFormat": "DD/MM/YYYY HH:mm:ss.SSS",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "delete_time",
-                  "type": "datetime",
-                  "displayAs": "datetime",
-                  "order": 11,
-                  "title": "delete_time",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "is_deleted",
-                  "type": "string",
-                  "displayAs": "string",
-                  "order": 12,
-                  "title": "State",
-                  "allowSearch": false,
-                  "alignContent": "left",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "numberFormat": "0",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "utilized_seconds",
-                  "type": "integer",
-                  "displayAs": "number",
-                  "order": 13,
-                  "title": "utilized_seconds",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "numberFormat": "0",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "idle_seconds",
-                  "type": "integer",
-                  "displayAs": "number",
-                  "order": 14,
-                  "title": "idle_seconds",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "numberFormat": "0",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "total_seconds",
-                  "type": "integer",
-                  "displayAs": "number",
-                  "order": 15,
-                  "title": "total_seconds",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                },
-                {
-                  "numberFormat": "0",
-                  "booleanValues": [
-                    "false",
-                    "true"
-                  ],
-                  "imageUrlTemplate": "{{ @ }}",
-                  "imageTitleTemplate": "{{ @ }}",
-                  "imageWidth": "",
-                  "imageHeight": "",
-                  "linkUrlTemplate": "{{ @ }}",
-                  "linkTextTemplate": "{{ @ }}",
-                  "linkTitleTemplate": "{{ @ }}",
-                  "linkOpenInNewTab": true,
-                  "name": "on_seconds",
-                  "type": "integer",
-                  "displayAs": "number",
-                  "order": 16,
-                  "title": "on_seconds",
-                  "allowSearch": false,
-                  "alignContent": "right",
-                  "allowHTML": false,
-                  "highlightLinks": false,
-                  "useMonospaceFont": false,
-                  "preserveWhitespace": false
-                }
-              ],
-              "allowHTMLByDefault": false,
-              "itemsPerPage": 25,
-              "paginationSize": "default",
-              "condensed": true,
-              "withRowNumber": false,
-              "frame": {
-                "showTitle": true,
-                "showDescription": true,
-                "title": "Warehouse Current Snapshot",
-                "description": "Lastest utilization & settings of each warehouse"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 4,
-            "width": 6,
-            "height": 5
-          }
-        },
-        {
-          "widget": {
-            "name": "93f2c698",
-            "multilineTextboxSpec": {
-              "lines": [
-                "## Single Warehouse Drilldown\n",
-                "\n",
-                "----\n",
-                "\n",
-                "This tab allows users to select a single warehouse to dig into more detailed metrics like utilization over time and scaling over time"
-              ]
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 17,
-            "width": 6,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "selected-warehouse-drilldown",
-            "queries": [
-              {
-                "name": "dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b1309a54fc5831b037c61_warehouse_name",
-                "query": {
-                  "datasetName": "304214bb",
-                  "fields": [
-                    {
-                      "name": "warehouse_name",
-                      "expression": "`warehouse_name`"
-                    },
-                    {
-                      "name": "warehouse_name_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b1362bb66142761a0d485_warehouse_name",
-                "query": {
-                  "datasetName": "36bb7aba",
-                  "parameters": [
-                    {
-                      "name": "warehouse_name",
-                      "keyword": "warehouse_name"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b13cd8e57bb65b056cb54_warehouse_name",
-                "query": {
-                  "datasetName": "12744d7e",
-                  "parameters": [
-                    {
-                      "name": "warehouse_name",
-                      "keyword": "warehouse_name"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              },
-              {
-                "name": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b13b0ad50690c548f7b6e_warehouse_name",
-                "query": {
-                  "datasetName": "e139c435",
-                  "parameters": [
-                    {
-                      "name": "warehouse_name",
-                      "keyword": "warehouse_name"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "widgetType": "filter-single-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "fieldName": "warehouse_name",
-                    "queryName": "dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b1309a54fc5831b037c61_warehouse_name"
-                  },
-                  {
-                    "parameterName": "warehouse_name",
-                    "queryName": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b1362bb66142761a0d485_warehouse_name"
-                  },
-                  {
-                    "parameterName": "warehouse_name",
-                    "queryName": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b13cd8e57bb65b056cb54_warehouse_name"
-                  },
-                  {
-                    "parameterName": "warehouse_name",
-                    "queryName": "parameter_dashboards/01f094c84f021fd6982ba6bc0f3b251f/datasets/01f09efe649b13b0ad50690c548f7b6e_warehouse_name"
-                  }
-                ]
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Selected Warehouse (Drilldown)"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 19,
-            "width": 4,
             "height": 2
           }
         }
