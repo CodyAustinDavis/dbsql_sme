@@ -256,13 +256,30 @@ class DatabricksSQLMonitor:
             fetch_start = window_start - timedelta(minutes=(s.lookback_buffer_minutes + max_lb))
             fetch_end = window_end
 
-            df_hist = self._fetch_query_history_df_multi(
-                workspace_host=workspace_host,
-                warehouse_ids=warehouse_ids,
-                start_time=fetch_start,
-                end_time=fetch_end,
-                include_metrics=True,
-            )
+            # Isolate a query-history failure to the workspace host it happens on. The
+            # fetch calls raise_for_status() while paging, so one 5xx/401/timeout would
+            # otherwise abort the whole poll before any sink emit - freezing every
+            # warehouse's metrics, including ones in other workspaces. Instead we treat
+            # that host's history as empty (its warehouses report status + zeroed query
+            # metrics), flag it via query_history_ok, and continue with other hosts.
+            history_ok = True
+            try:
+                df_hist = self._fetch_query_history_df_multi(
+                    workspace_host=workspace_host,
+                    warehouse_ids=warehouse_ids,
+                    start_time=fetch_start,
+                    end_time=fetch_end,
+                    include_metrics=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - one host must not sink the poll
+                history_ok = False
+                df_hist = pd.DataFrame()
+                print(
+                    f"[monitor] query-history fetch failed for {workspace_host}: "
+                    f"{type(exc).__name__}: {exc}. Emitting status + zeroed query "
+                    f"metrics for its warehouses and continuing with other hosts.",
+                    flush=True,
+                )
 
             status_map = self._fetch_warehouse_status_batch(workspace_host, warehouse_ids)
 
@@ -282,6 +299,9 @@ class DatabricksSQLMonitor:
                 metrics["rows_fetched_history"] = float(len(df_wh)) if df_wh is not None else 0.0
                 metrics["rows_fetched_history_batch"] = float(len(df_hist)) if df_hist is not None else 0.0
                 metrics["poll_count"] = float(self.poll_count)
+                # 1.0 when the query-history feed for this host succeeded this poll,
+                # 0.0 when it failed (query metrics above are zeroed, not truly idle).
+                metrics["query_history_ok"] = 1.0 if history_ok else 0.0
 
                 events.append(MetricEvent(
                     monitor_name=self.name,
@@ -302,6 +322,13 @@ class DatabricksSQLMonitor:
     # ----------------------------
     def _refresh_dynamic_lookbacks(self) -> None:
         s = self.settings
+        # The dynamic p99 refresh runs SQL against system.query.history through a
+        # control warehouse. When no control warehouse is configured, skip it and keep
+        # the fixed lookback (long_lb_min_minutes), so the monitor can run without ever
+        # starting a SQL warehouse (e.g. the Prometheus exporter). Set both
+        # control_workspace_host and control_warehouse_id to enable dynamic tuning.
+        if not (s.control_workspace_host and s.control_warehouse_id):
+            return
         p99_map = self._fetch_p99_wall_ms_by_warehouse_from_system_table(
             control_workspace_url=s.control_workspace_host,
             control_warehouse_id=s.control_warehouse_id,

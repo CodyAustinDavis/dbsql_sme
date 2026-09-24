@@ -1,0 +1,64 @@
+# Example alert rules. Thresholds are starting points, tune them to the workload's
+# SLA. Delivered as a Prometheus Operator PrometheusRule; the expr/for/labels also
+# drop straight into a plain Prometheus rules file if you are not running the operator.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dbsql-warehouse-exporter
+  namespace: monitoring
+  labels:
+    app: dbsql-warehouse-exporter
+spec:
+  groups:
+    - name: dbsql-warehouse
+      rules:
+        - alert: DBSQLWarehouseUnhealthy
+          # 1=DEGRADED, 2=FAILED. -1 (unreachable/unknown) is intentionally excluded so
+          # a deliberately stopped warehouse does not page; staleness + up cover reachability.
+          expr: dbsql_warehouse_health_status >= 1
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SQL warehouse {{ $labels.warehouse_id }} health degraded"
+            description: "health_status={{ $value }} on {{ $labels.workspace_host }} for 2m."
+
+        - alert: DBSQLExporterStale
+          # No successful poll wrote this warehouse's sample recently: exporter stuck or
+          # its whole poll failing. Pair with `up{job=...} == 0` for a dead scrape target.
+          expr: time() - dbsql_last_poll_unixtime > 180
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "DBSQL exporter data stale for {{ $labels.warehouse_id }}"
+            description: "No fresh poll in >3m on {{ $labels.workspace_host }}."
+
+        - alert: DBSQLQueryHistoryDown
+          # Warehouse health/state can look fine while qps/latency/queue are blind
+          # because the Query History API feed for this host is failing.
+          expr: dbsql_query_history_ok == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Query History feed down for {{ $labels.warehouse_id }}"
+            description: "query_history_ok=0 on {{ $labels.workspace_host }}; qps/latency/queue gauges are unreliable."
+
+        - alert: DBSQLWarehouseQueueBackedUp
+          expr: dbsql_queued_p99_sec > 30
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SQL warehouse {{ $labels.warehouse_id }} queue backing up"
+            description: "queued_p99_sec={{ $value }}s on {{ $labels.workspace_host }} for 2m (tune to your SLA)."
+
+        - alert: DBSQLWarehousePinnedAtMax
+          expr: dbsql_warehouse_current_clusters >= dbsql_warehouse_max_num_clusters and dbsql_warehouse_max_num_clusters > 0
+          for: 5m
+          labels:
+            severity: info
+          annotations:
+            summary: "SQL warehouse {{ $labels.warehouse_id }} at max clusters"
+            description: "Autoscaling saturated (current >= max) for 5m on {{ $labels.workspace_host }}."

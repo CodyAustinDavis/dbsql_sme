@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dbsql-warehouse-exporter
+  namespace: monitoring
+  labels:
+    app: dbsql-warehouse-exporter
+spec:
+  # ClusterIP only. Keep /metrics off any public load balancer; the payload
+  # includes warehouse IDs and workspace hosts.
+  type: ClusterIP
+  selector:
+    app: dbsql-warehouse-exporter
+  ports:
+    - name: metrics
+      port: 9877
+      targetPort: metrics
