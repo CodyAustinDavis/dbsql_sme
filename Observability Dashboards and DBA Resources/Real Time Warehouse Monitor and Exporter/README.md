@@ -38,10 +38,12 @@ tables are documented as not supporting real-time monitoring. Polling the Query 
 returns sub-second and runs no SQL on the warehouse, so it costs no warehouse DBUs to
 collect. That is the freshness this exporter is built around.
 
-## Design (scrape, not push)
+## How the Prometheus exporter delivers (scrape, not push)
 
-The exporter is a long-running service. On its poll interval it calls the APIs, computes
-metrics, and writes them into in-memory Prometheus gauges. Prometheus scrapes `/metrics` and
+This applies to the Prometheus sink only. The monitor's other sinks push, Datadog posts to
+its API and Delta writes rows to a table. The Prometheus path is instead scraped. The
+exporter is a long-running service that, on its poll interval, calls the APIs, computes
+metrics, and writes them into in-memory Prometheus gauges. Prometheus scrapes `/metrics`, and
 hitting it does not trigger an API call, it just serializes the latest values. Freshness is
 bounded by the poll interval, not the scrape.
 
