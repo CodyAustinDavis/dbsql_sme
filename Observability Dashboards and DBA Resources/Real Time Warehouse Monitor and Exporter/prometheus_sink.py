@@ -20,13 +20,17 @@ The sink reads event fields by attribute so it does not need to import the monit
 
 from __future__ import annotations
 
+import socketserver
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from prometheus_client import CollectorRegistry, Gauge, start_http_server
+from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
+
+from prometheus_client import CollectorRegistry, Gauge, make_wsgi_app
 
 
 # The monitor emits warehouse_health_status as a string. Encode it numerically so it
@@ -52,7 +56,7 @@ _STATE_ENCODING: Dict[str, float] = {
 _SPECIAL_KEYS = {_HEALTH_KEY, _STATE_KEY}
 
 # String / non-metric fields that are not exported as gauges.
-# (warehouse_name / warehouse_size could become labels later; see README.)
+# warehouse_name / warehouse_size are exported as labels on dbsql_warehouse_info instead.
 _SKIP_KEYS = {
     "queue_life_p95_sentence",
     "warehouse_name",
@@ -62,6 +66,22 @@ _SKIP_KEYS = {
 
 _LABELS: Tuple[str, ...] = ("warehouse_id", "workspace_host", "monitor")
 _LabelTuple = Tuple[str, str, str]
+_AnyLabels = Tuple[str, ...]  # a label set of any gauge (base or info)
+
+# Info series (value always 1) carrying descriptive labels. Joined in PromQL with
+# `* on(warehouse_id) group_left(warehouse_name, warehouse_size) dbsql_warehouse_info`,
+# so the numeric gauges keep a stable label set when a name changes or a status poll fails.
+_INFO_NAME = "warehouse_info"
+_INFO_LABELS: Tuple[str, ...] = _LABELS + ("warehouse_name", "warehouse_size")
+
+
+class _ThreadingWSGIServer(socketserver.ThreadingMixIn, WSGIServer):
+    daemon_threads = True
+
+
+class _QuietHandler(WSGIRequestHandler):
+    def log_message(self, *args: Any) -> None:  # keep scrape traffic out of the logs
+        pass
 
 
 @dataclass
@@ -81,22 +101,34 @@ class PrometheusSink:
 
     # internal state
     _gauges: Dict[str, Gauge] = field(default_factory=dict, repr=False)
-    _active: Dict[str, Set[_LabelTuple]] = field(default_factory=lambda: defaultdict(set), repr=False)
+    _active: Dict[str, Set[_AnyLabels]] = field(default_factory=lambda: defaultdict(set), repr=False)
     _server_started: bool = field(default=False, repr=False)
+    _info_cache: Dict[_LabelTuple, Tuple[str, str]] = field(default_factory=dict, repr=False)
 
     # ------------------------------------------------------------------ server
     def start_server(self, port: Optional[int] = None, addr: str = "0.0.0.0") -> None:
-        """Start the /metrics HTTP endpoint. Safe to call once; later calls no-op.
+        """Start the HTTP endpoint in a background thread. Safe to call once.
 
-        addr defaults to 0.0.0.0 for in-cluster scraping behind a ServiceMonitor.
-        Bind 127.0.0.1 when running locally, and keep /metrics off the public
-        network in EKS; the payload includes warehouse IDs and workspace hosts.
+        Serves /healthz (a plain 200 for liveness, independent of metric exposition)
+        and the metrics on every other path, including /metrics. addr defaults to
+        0.0.0.0 for in-cluster scraping; bind 127.0.0.1 when running locally, and keep
+        it off the public network since the payload includes warehouse IDs and hosts.
         """
         if self._server_started:
             return
         if port is not None:
             self.port = port
-        start_http_server(self.port, addr=addr, registry=self.registry)
+        metrics_app = make_wsgi_app(self.registry)
+
+        def app(environ: Dict[str, Any], start_response: Any) -> Any:
+            if environ.get("PATH_INFO") == "/healthz":
+                start_response("200 OK", [("Content-Type", "text/plain; charset=utf-8")])
+                return [b"ok\n"]
+            return metrics_app(environ, start_response)
+
+        httpd = make_server(addr, self.port, app, _ThreadingWSGIServer, handler_class=_QuietHandler)
+        self.port = httpd.server_port  # resolves port=0 to the bound port (tests)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self._server_started = True
 
     # ------------------------------------------------------------ Sink protocol
@@ -105,7 +137,7 @@ class PrometheusSink:
         if not events:
             return
 
-        seen: Dict[str, Set[_LabelTuple]] = defaultdict(set)
+        seen: Dict[str, Set[_AnyLabels]] = defaultdict(set)
 
         for e in events:
             wid = str(getattr(e, "entity_id", "") or "")
@@ -138,15 +170,32 @@ class PrometheusSink:
             self._gauge(sname, "warehouse state: STOPPED=0 STARTING=1 RUNNING=2 STOPPING=3 DELETING=4 DELETED=5 unknown=-1").labels(**labels).set(sval)
             seen[sname].add(label_tuple)
 
+            # info: descriptive labels, value 1. Keep the last known name/size so a
+            # failed status poll does not drop or churn the series.
+            name = metrics.get("warehouse_name")
+            if isinstance(name, str) and name:
+                size = metrics.get("warehouse_size")
+                self._info_cache[label_tuple] = (name, str(size) if size else "")
+            cached = self._info_cache.get(label_tuple)
+            if cached is not None:
+                iname = self._metric_name(_INFO_NAME)
+                info_tuple = label_tuple + cached
+                self._gauge(iname, "warehouse descriptive labels (value is always 1)", _INFO_LABELS).labels(*info_tuple).set(1.0)
+                seen[iname].add(info_tuple)
+
             # freshness: alert on (time() - this) to catch a stopped exporter
             fname = self._metric_name("last_poll_unixtime")
             self._gauge(fname, "unix timestamp of the last poll that produced this warehouse's sample").labels(**labels).set(self._event_ts(e))
             seen[fname].add(label_tuple)
 
+        present = {(str(getattr(e, "entity_id", "") or ""), str(getattr(e, "workspace_host", "") or ""), str(getattr(e, "monitor_name", "") or "")) for e in events}
+        for lt in list(self._info_cache):
+            if lt not in present:
+                del self._info_cache[lt]
         self._prune(seen)
 
     # ------------------------------------------------------------------ helpers
-    def _prune(self, seen: Dict[str, Set[_LabelTuple]]) -> None:
+    def _prune(self, seen: Dict[str, Set[_AnyLabels]]) -> None:
         """Remove label sets not present this poll (dropped warehouses, absent metrics)."""
         for name, gauge in self._gauges.items():
             stale = self._active.get(name, set()) - seen.get(name, set())
@@ -181,10 +230,10 @@ class PrometheusSink:
         safe = "".join(c if (c.isalnum() or c == "_") else "_" for c in key)
         return f"{self.namespace}_{safe}"
 
-    def _gauge(self, name: str, help_text: str) -> Gauge:
+    def _gauge(self, name: str, help_text: str, labelnames: Tuple[str, ...] = _LABELS) -> Gauge:
         g = self._gauges.get(name)
         if g is None:
-            g = Gauge(name, help_text, labelnames=_LABELS, registry=self.registry)
+            g = Gauge(name, help_text, labelnames=labelnames, registry=self.registry)
             self._gauges[name] = g
         return g
 

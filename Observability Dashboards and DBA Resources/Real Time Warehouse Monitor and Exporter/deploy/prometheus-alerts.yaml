@@ -45,6 +45,19 @@ spec:
             summary: "Query History feed down for {{ $labels.warehouse_id }}"
             description: "query_history_ok=0 on {{ $labels.workspace_host }}; qps/latency/queue gauges are unreliable."
 
+        - alert: DBSQLQueryHistoryPossiblyScoped
+          # Query History authenticates fine (query_history_ok=1) but returns no rows for a
+          # warehouse that has been RUNNING the whole time. Either the warehouse is truly
+          # idle with auto-stop disabled, or the principal can only see its own queries
+          # (identity-scoped history), in which case qps/latency/queue read zero.
+          expr: dbsql_warehouse_state == 2 and dbsql_query_history_ok == 1 and dbsql_rows_fetched_history == 0
+          for: 30m
+          labels:
+            severity: info
+          annotations:
+            summary: "No Query History rows for running warehouse {{ $labels.warehouse_id }}"
+            description: "Running for 30m with zero history rows on {{ $labels.workspace_host }}; check that the principal can see other users' queries."
+
         - alert: DBSQLWarehouseQueueBackedUp
           expr: dbsql_queued_p99_sec > 30
           for: 2m

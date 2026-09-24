@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+# No bytecode writes (the pod runs with a read-only root filesystem) and unbuffered logs.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 # Run as a non-root user.
 RUN useradd --create-home --uid 10001 exporter
 WORKDIR /app

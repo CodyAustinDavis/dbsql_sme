@@ -2,8 +2,8 @@
 Tests for auth.py. Runs with pytest, or standalone:  python test_auth.py
 
 Covers the OAuth M2M token cache/refresh behavior, per-host token isolation, and the
-BearerAuth adapter that stamps a fresh token on every request (the reason a refreshed
-token actually takes effect through the monitor's long-lived session).
+static token getter. Per-request header injection lives in the monitor and is covered by
+test_warehouse_monitor.py.
 """
 
 import os
@@ -11,7 +11,7 @@ import sys
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from auth import BearerAuth, OAuthM2MTokenProvider, static_token_getter  # noqa: E402
+from auth import OAuthM2MTokenProvider, static_token_getter  # noqa: E402
 
 
 class _FakeResp:
@@ -104,23 +104,6 @@ def test_missing_access_token_raises():
     except RuntimeError:
         return
     raise AssertionError("expected RuntimeError when access_token is absent")
-
-
-def test_bearer_auth_sets_header_from_request_host():
-    seen = {}
-
-    def getter(host):
-        seen["host"] = host
-        return f"token-for-{host}"
-
-    auth = BearerAuth(getter)
-    req = SimpleNamespace(
-        url="https://myhost.cloud.databricks.com/api/2.0/sql/history/queries",
-        headers={},
-    )
-    out = auth(req)
-    assert seen["host"] == "myhost.cloud.databricks.com"
-    assert out.headers["Authorization"] == "Bearer token-for-myhost.cloud.databricks.com"
 
 
 def test_static_token_getter():

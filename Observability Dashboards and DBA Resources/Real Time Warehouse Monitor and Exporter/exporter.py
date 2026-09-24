@@ -27,18 +27,15 @@ import json
 import os
 import time
 
+import requests
+
 from warehouse_monitor import (
     DatabricksSQLMonitor,
     DatabricksSQLMonitorSettings,
 )
 from prometheus_sink import PrometheusSink
-from auth import BearerAuth, OAuthM2MTokenProvider, TokenGetter, static_token_getter
+from auth import OAuthM2MTokenProvider, TokenGetter, static_token_getter
 
-# Sentinel token used to satisfy the monitor constructor when auth is OAuth M2M.
-# The monitor bakes an Authorization header from settings.databricks_token at init;
-# we override that header with BearerAuth before any request is sent, so this value
-# never reaches an API. See _install_auth.
-_OAUTH_SENTINEL = "oauth-m2m"
 
 
 def _env_map(name: str) -> dict:
@@ -97,25 +94,48 @@ def _build_token_getter() -> TokenGetter:
     )
 
 
-def _install_auth(monitor: DatabricksSQLMonitor, token_getter: TokenGetter) -> None:
-    """Route the monitor's session through BearerAuth so every request gets a fresh
-    token, and drop the static Authorization header the constructor baked in."""
-    monitor.session.auth = BearerAuth(token_getter)
-    monitor.session.headers.pop("Authorization", None)
-
-
 def _prewarm(token_getter: TokenGetter, hosts) -> None:
-    """Fetch a token for each host up front so misconfigured credentials or missing
-    warehouse grants fail loudly at startup instead of silently on the first poll."""
+    """Fetch a token for each host up front so bad credentials fail loudly at startup.
+
+    This only proves the credentials can mint a workspace token. Warehouse permissions
+    are checked separately by _probe_access.
+    """
     for host in sorted(set(hosts)):
         try:
             token_getter(host)
         except Exception as exc:  # noqa: BLE001 - surface any auth failure clearly
             raise SystemExit(
                 f"Failed to obtain a token for {host}: {type(exc).__name__}: {exc}. "
-                "Check the service principal credentials and that it has CAN MONITOR "
-                "on the warehouses in this workspace."
+                "Check the service principal client id and secret, and that the "
+                "principal is added to this workspace."
             )
+
+
+def _probe_access(monitor: DatabricksSQLMonitor, warehouse_map: dict) -> None:
+    """Call Warehouses Get once per warehouse so a missing grant fails at startup.
+
+    401/403/404 means the principal cannot see that warehouse (missing CAN MONITOR or a
+    wrong id), which exits with a clear message. Other errors (5xx, timeouts) are logged
+    and left to the resilient poll loop, since they are usually transient. This does not
+    prove Query History returns other users' queries; see PROMETHEUS_EXPORTER.md.
+    """
+    denied = []
+    for wid, host in sorted(warehouse_map.items()):
+        try:
+            monitor._fetch_warehouse_status(wid, host)
+        except requests.HTTPError as exc:
+            code = exc.response.status_code if exc.response is not None else None
+            if code in (401, 403, 404):
+                denied.append(f"{wid} on {host} (HTTP {code})")
+            else:
+                print(f"[exporter] startup probe for {wid} on {host} failed: {exc}", flush=True)
+        except Exception as exc:  # noqa: BLE001 - transient; the poll loop retries
+            print(f"[exporter] startup probe for {wid} on {host} failed: {exc}", flush=True)
+    if denied:
+        raise SystemExit(
+            "The principal cannot read these warehouses: " + ", ".join(denied)
+            + ". Grant CAN MONITOR on each warehouse and check the warehouse ids."
+        )
 
 
 def _run_resilient(monitor: DatabricksSQLMonitor, poll_interval: int, max_backoff: int) -> None:
@@ -166,10 +186,6 @@ def main() -> None:
             + ", ".join(empty_hosts)
         )
 
-    is_oauth = bool(
-        os.environ.get("DATABRICKS_CLIENT_ID", "").strip()
-        and os.environ.get("DATABRICKS_CLIENT_SECRET", "").strip()
-    )
     token_getter = _build_token_getter()
 
     poll = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
@@ -177,13 +193,12 @@ def main() -> None:
     namespace = os.environ.get("METRICS_NAMESPACE", "dbsql")
     max_backoff = int(os.environ.get("MAX_BACKOFF_SECONDS", "300"))
 
-    # Fail fast on bad credentials / missing grants before we start serving.
+    # Fail fast on bad credentials before we start serving.
     _prewarm(token_getter, warehouse_map.values())
 
     settings = DatabricksSQLMonitorSettings(
-        # A non-empty token is required by the constructor; the real Authorization
-        # header is supplied per-request by BearerAuth (see _install_auth).
-        databricks_token=_OAUTH_SENTINEL,
+        # Per-request auth for every workspace host; nothing is written to the environment.
+        token_getter=token_getter,
         poll_interval_seconds=poll,
         warehouse_workspace_map=warehouse_map,
         # control_workspace_host / control_warehouse_id left unset on purpose:
@@ -195,14 +210,8 @@ def main() -> None:
     sink.start_server()  # binds 0.0.0.0 for in-cluster scrape; keep off the public net
 
     monitor = DatabricksSQLMonitor(settings=settings, sinks=[sink])
-    _install_auth(monitor, token_getter)
-
-    # On the OAuth path the monitor constructor copied the sentinel into
-    # os.environ["DATABRICKS_TOKEN"]. _install_auth has already replaced the baked
-    # header with per-request OAuth, so drop the sentinel rather than leave a value in
-    # the environment that looks like a real token.
-    if is_oauth and os.environ.get("DATABRICKS_TOKEN") == _OAUTH_SENTINEL:
-        os.environ.pop("DATABRICKS_TOKEN", None)
+    # Fail fast on missing warehouse grants before the first poll.
+    _probe_access(monitor, warehouse_map)
 
     print(
         f"Serving /metrics on :{port}, polling {len(warehouse_map)} warehouse(s) "

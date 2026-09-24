@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Tuple, Optional, Protocol
+from typing import Callable, Dict, Any, List, Tuple, Optional, Protocol
+from urllib.parse import urlsplit
 
 import requests
 import pandas as pd
@@ -117,8 +118,12 @@ class DatabricksSQLMonitorSettings:
     # identity
     name: str = "databricks.warehouse"
 
-    # auth
+    # auth: supply either a static databricks_token, or a token_getter that returns a
+    # bearer token for a workspace host (e.g. an OAuth M2M provider that refreshes).
+    # When token_getter is set, databricks_token is not required and is not written
+    # to the process environment.
     databricks_token: str = ""
+    token_getter: Optional[Callable[[str], str]] = None
 
     # poll timing
     poll_interval_seconds: int = 60
@@ -162,6 +167,17 @@ class DatabricksSQLMonitorSettings:
 # Databricks SQL monitor implementation
 # =========================================================
 
+class _TokenGetterAuth(requests.auth.AuthBase):
+    """Sets a fresh bearer token on every request, looked up by request host."""
+
+    def __init__(self, token_getter: Callable[[str], str]) -> None:
+        self._token_getter = token_getter
+
+    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
+        request.headers["Authorization"] = f"Bearer {self._token_getter(urlsplit(request.url).netloc)}"
+        return request
+
+
 class DatabricksSQLMonitor:
     TERMINAL_STATUSES = {"FINISHED", "FAILED", "CANCELED"}
     SUCCESS_STATUS = "FINISHED"
@@ -173,13 +189,18 @@ class DatabricksSQLMonitor:
         self.name = settings.name
         self.sinks = sinks
 
-        if not settings.databricks_token:
-            raise ValueError("Databricks token is required in settings.databricks_token")
-
-        os.environ["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN", settings.databricks_token)
-
         self.session = requests.Session()
-        self.session.headers.update(self._auth_headers())
+        if settings.token_getter is not None:
+            # Per-request auth; no static header and nothing written to the environment.
+            self.session.auth = _TokenGetterAuth(settings.token_getter)
+            self.session.headers.update({"Accept-Encoding": "gzip"})
+        else:
+            if not settings.databricks_token:
+                raise ValueError(
+                    "Set settings.databricks_token or settings.token_getter for authentication"
+                )
+            os.environ["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN", settings.databricks_token)
+            self.session.headers.update(self._auth_headers())
 
         self.poll_count = 0
         self.long_lookback_by_wh = {wid: settings.long_lb_min_minutes for wid in settings.warehouse_workspace_map.keys()}
@@ -954,8 +975,9 @@ if __name__ == "__main__":
         poll_interval_seconds=60,
         rolling_window_minutes=10,
         lookback_buffer_minutes=2,
-        control_workspace_host="<CONTROL_HOST_URL",
-        control_warehouse_id="<WAREHOUSE>",
+        # Optional: set control_workspace_host and control_warehouse_id to enable the
+        # dynamic p99 lookback refresh (runs SQL on that warehouse). Leave them unset to
+        # use the fixed lookback and never start a warehouse.
         warehouse_workspace_map={
             "warehouse_id_1": "warehouse_host_1",
             "warehouse_id_2": "warehouse_host_2",

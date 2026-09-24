@@ -134,6 +134,35 @@ def test_naive_timestamp_is_treated_as_utc():
     assert naive_ts == aware_ts  # naive interpreted as UTC, no local-time shift
 
 
+def test_info_series_carries_name_and_size_and_survives_failed_status():
+    sink = PrometheusSink()
+    sink.emit([_event("wh1", _healthy_metrics())])
+    info = dict(LABELS, warehouse_name="analytics-wh", warehouse_size="MEDIUM")
+    assert sink.registry.get_sample_value("dbsql_warehouse_info", info) == 1.0
+
+    # a failed status poll omits name/size; the info series keeps the last known values
+    sink.emit([_event("wh1", {"qps": 0.0, "warehouse_state": "UNKNOWN"})])
+    assert sink.registry.get_sample_value("dbsql_warehouse_info", info) == 1.0
+
+    # a dropped warehouse loses its info series too
+    sink.emit([_event("wh2", _healthy_metrics())])
+    assert sink.registry.get_sample_value("dbsql_warehouse_info", info) is None
+
+
+def test_healthz_and_metrics_endpoints():
+    import urllib.request
+
+    sink = PrometheusSink(port=0)
+    sink.start_server(addr="127.0.0.1")
+    sink.emit([_event("wh1", _healthy_metrics())])
+    base = f"http://127.0.0.1:{sink.port}"
+    with urllib.request.urlopen(base + "/healthz", timeout=5) as r:
+        assert r.status == 200 and r.read() == b"ok\n"
+    with urllib.request.urlopen(base + "/metrics", timeout=5) as r:
+        body = r.read().decode()
+    assert 'dbsql_qps{monitor="m",warehouse_id="wh1",workspace_host="h"} 12.0' in body
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

@@ -20,6 +20,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: exporter
           image: REPLACE_WITH_IMAGE   # e.g. <registry>/dbsql-warehouse-exporter:<tag>
@@ -38,22 +40,36 @@ spec:
           envFrom:
             - secretRef:
                 name: dbsql-exporter-sp   # DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # pandas plus a paged Query History pull (up to 1000 rows/page over a 30+ min
+          # lookback) needs headroom. Start here and tune from observed usage; busy
+          # warehouse maps may need the limit raised further.
           resources:
             requests:
-              cpu: 50m
-              memory: 128Mi
+              cpu: 100m
+              memory: 512Mi
             limits:
-              cpu: 250m
-              memory: 256Mi
+              cpu: 500m
+              memory: 1Gi
           readinessProbe:
             httpGet:
-              path: /metrics
+              path: /healthz
               port: metrics
             initialDelaySeconds: 10
             periodSeconds: 15
           livenessProbe:
             httpGet:
-              path: /metrics
+              path: /healthz
               port: metrics
             initialDelaySeconds: 20
             periodSeconds: 30
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

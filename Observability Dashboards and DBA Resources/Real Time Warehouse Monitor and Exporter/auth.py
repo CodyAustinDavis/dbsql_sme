@@ -10,10 +10,9 @@ Two modes:
   ``OAuthM2MTokenProvider`` caches a token per workspace host and refreshes it
   before it expires.
 
-Both modes are wired into the monitor through ``BearerAuth``, a ``requests`` auth
-adapter that stamps a fresh ``Authorization`` header on every request. That matters
-because the monitor builds its ``requests.Session`` once and would otherwise cache a
-single bearer header for the life of the process.
+Both modes produce a token getter, ``host -> token``, that the exporter passes to the
+monitor as ``DatabricksSQLMonitorSettings.token_getter``. The monitor calls it on every
+request, so a refreshed OAuth token is picked up without rebuilding the session.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from __future__ import annotations
 import threading
 import time
 from typing import Callable, Dict, Optional, Tuple
-from urllib.parse import urlsplit
 
 import requests
 
@@ -120,21 +118,6 @@ class OAuthM2MTokenProvider:
         # expires_in is seconds; default to a conservative hour if the field is absent.
         return token, float(payload.get("expires_in", 3600))
 
-
-class BearerAuth(requests.auth.AuthBase):
-    """A ``requests`` auth adapter that sets a fresh bearer token on every request.
-
-    ``token_getter`` is called with the request host (netloc), so one session can
-    talk to multiple workspaces, each getting its own token.
-    """
-
-    def __init__(self, token_getter: TokenGetter) -> None:
-        self._token_getter = token_getter
-
-    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
-        host = urlsplit(request.url).netloc
-        request.headers["Authorization"] = f"Bearer {self._token_getter(host)}"
-        return request
 
 
 def static_token_getter(token: str) -> TokenGetter:
