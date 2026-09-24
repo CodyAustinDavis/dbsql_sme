@@ -1,12 +1,19 @@
-# Real Time Warehouse Monitor and Prometheus/Grafana Exporter
+# Real Time Warehouse Monitor and Exporter
 
-Near-real-time observability for Databricks SQL Warehouses, exported to Prometheus and
-Grafana. A small exporter polls the Databricks REST APIs and exposes per-warehouse
-metrics on a `/metrics` endpoint that Prometheus scrapes.
+Near-real-time observability for Databricks SQL Warehouses. A monitor polls the Databricks
+REST APIs (Query History and Warehouses) on an interval and computes per-warehouse metrics,
+throughput, queue and runtime percentiles, concurrency, failure and spill rates, health, and
+state. It ships those metrics to pluggable sinks and runs either as a notebook or as a
+long-lived service.
 
-This is the fresh, API-based counterpart to the system-tables/dashboard advisors in this
-repo. It is for teams whose observability already lives in Prometheus and Grafana and who
-want warehouse health there rather than in a Databricks-native dashboard.
+The monitor's built-in sinks are Console, Datadog, Delta, and the Prometheus sink added here.
+This folder wires that Prometheus path end to end, an exporter that serves the metrics on a
+`/metrics` endpoint for Prometheus to scrape into Grafana. That path is the fresh, API-based
+counterpart to the system-tables dashboard advisors in this repo, for teams whose
+observability lives in Prometheus and Grafana rather than a Databricks-native dashboard.
+
+The monitor is usable on its own with any sink. The sections below focus on the Prometheus
+exporter, since that is what this folder adds and deploys.
 
 ## Contents
 
