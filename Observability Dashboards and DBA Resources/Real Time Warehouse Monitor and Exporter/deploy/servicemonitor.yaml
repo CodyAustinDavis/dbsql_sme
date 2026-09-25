@@ -1,0 +1,20 @@
+# Requires the Prometheus Operator (kube-prometheus-stack). If you scrape with a
+# plain Prometheus config instead, add a static/kubernetes_sd job that targets the
+# Service on port 9877, path /metrics.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dbsql-warehouse-exporter
+  namespace: monitoring
+  labels:
+    app: dbsql-warehouse-exporter
+    # Add whatever label your Prometheus's serviceMonitorSelector matches,
+    # e.g. release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: dbsql-warehouse-exporter
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics

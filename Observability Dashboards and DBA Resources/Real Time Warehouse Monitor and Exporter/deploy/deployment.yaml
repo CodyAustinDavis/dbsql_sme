@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dbsql-warehouse-exporter
+  namespace: monitoring
+  labels:
+    app: dbsql-warehouse-exporter
+spec:
+  # Single replica on purpose. Two would poll the same warehouses and publish
+  # duplicate series; scale the poll interval, not the replica count.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dbsql-warehouse-exporter
+  template:
+    metadata:
+      labels:
+        app: dbsql-warehouse-exporter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: exporter
+          image: REPLACE_WITH_IMAGE   # e.g. <registry>/dbsql-warehouse-exporter:<tag>
+          ports:
+            - name: metrics
+              containerPort: 9877
+          env:
+            - name: WAREHOUSE_WORKSPACE_MAP
+              value: '{"<warehouse_id>": "<workspace_host>"}'
+            - name: POLL_INTERVAL_SECONDS
+              value: "30"
+            - name: METRICS_PORT
+              value: "9877"
+            - name: DATABRICKS_OAUTH_SCOPE
+              value: "all-apis"
+          envFrom:
+            - secretRef:
+                name: dbsql-exporter-sp   # DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # pandas plus a paged Query History pull (up to 1000 rows/page over a 30+ min
+          # lookback) needs headroom. Start here and tune from observed usage; busy
+          # warehouse maps may need the limit raised further.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

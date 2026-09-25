@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Tuple, Optional, Protocol
+from typing import Callable, Dict, Any, List, Tuple, Optional, Protocol
+from urllib.parse import urlsplit
 
 import requests
 import pandas as pd
@@ -117,8 +118,12 @@ class DatabricksSQLMonitorSettings:
     # identity
     name: str = "databricks.warehouse"
 
-    # auth
+    # auth: supply either a static databricks_token, or a token_getter that returns a
+    # bearer token for a workspace host (e.g. an OAuth M2M provider that refreshes).
+    # When token_getter is set, databricks_token is not required and is not written
+    # to the process environment.
     databricks_token: str = ""
+    token_getter: Optional[Callable[[str], str]] = None
 
     # poll timing
     poll_interval_seconds: int = 60
@@ -162,6 +167,17 @@ class DatabricksSQLMonitorSettings:
 # Databricks SQL monitor implementation
 # =========================================================
 
+class _TokenGetterAuth(requests.auth.AuthBase):
+    """Sets a fresh bearer token on every request, looked up by request host."""
+
+    def __init__(self, token_getter: Callable[[str], str]) -> None:
+        self._token_getter = token_getter
+
+    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
+        request.headers["Authorization"] = f"Bearer {self._token_getter(urlsplit(request.url).netloc)}"
+        return request
+
+
 class DatabricksSQLMonitor:
     TERMINAL_STATUSES = {"FINISHED", "FAILED", "CANCELED"}
     SUCCESS_STATUS = "FINISHED"
@@ -173,13 +189,18 @@ class DatabricksSQLMonitor:
         self.name = settings.name
         self.sinks = sinks
 
-        if not settings.databricks_token:
-            raise ValueError("Databricks token is required in settings.databricks_token")
-
-        os.environ["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN", settings.databricks_token)
-
         self.session = requests.Session()
-        self.session.headers.update(self._auth_headers())
+        if settings.token_getter is not None:
+            # Per-request auth; no static header and nothing written to the environment.
+            self.session.auth = _TokenGetterAuth(settings.token_getter)
+            self.session.headers.update({"Accept-Encoding": "gzip"})
+        else:
+            if not settings.databricks_token:
+                raise ValueError(
+                    "Set settings.databricks_token or settings.token_getter for authentication"
+                )
+            os.environ["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN", settings.databricks_token)
+            self.session.headers.update(self._auth_headers())
 
         self.poll_count = 0
         self.long_lookback_by_wh = {wid: settings.long_lb_min_minutes for wid in settings.warehouse_workspace_map.keys()}
@@ -256,13 +277,30 @@ class DatabricksSQLMonitor:
             fetch_start = window_start - timedelta(minutes=(s.lookback_buffer_minutes + max_lb))
             fetch_end = window_end
 
-            df_hist = self._fetch_query_history_df_multi(
-                workspace_host=workspace_host,
-                warehouse_ids=warehouse_ids,
-                start_time=fetch_start,
-                end_time=fetch_end,
-                include_metrics=True,
-            )
+            # Isolate a query-history failure to the workspace host it happens on. The
+            # fetch calls raise_for_status() while paging, so one 5xx/401/timeout would
+            # otherwise abort the whole poll before any sink emit - freezing every
+            # warehouse's metrics, including ones in other workspaces. Instead we treat
+            # that host's history as empty (its warehouses report status + zeroed query
+            # metrics), flag it via query_history_ok, and continue with other hosts.
+            history_ok = True
+            try:
+                df_hist = self._fetch_query_history_df_multi(
+                    workspace_host=workspace_host,
+                    warehouse_ids=warehouse_ids,
+                    start_time=fetch_start,
+                    end_time=fetch_end,
+                    include_metrics=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - one host must not sink the poll
+                history_ok = False
+                df_hist = pd.DataFrame()
+                print(
+                    f"[monitor] query-history fetch failed for {workspace_host}: "
+                    f"{type(exc).__name__}: {exc}. Emitting status + zeroed query "
+                    f"metrics for its warehouses and continuing with other hosts.",
+                    flush=True,
+                )
 
             status_map = self._fetch_warehouse_status_batch(workspace_host, warehouse_ids)
 
@@ -282,6 +320,9 @@ class DatabricksSQLMonitor:
                 metrics["rows_fetched_history"] = float(len(df_wh)) if df_wh is not None else 0.0
                 metrics["rows_fetched_history_batch"] = float(len(df_hist)) if df_hist is not None else 0.0
                 metrics["poll_count"] = float(self.poll_count)
+                # 1.0 when the query-history feed for this host succeeded this poll,
+                # 0.0 when it failed (query metrics above are zeroed, not truly idle).
+                metrics["query_history_ok"] = 1.0 if history_ok else 0.0
 
                 events.append(MetricEvent(
                     monitor_name=self.name,
@@ -302,6 +343,13 @@ class DatabricksSQLMonitor:
     # ----------------------------
     def _refresh_dynamic_lookbacks(self) -> None:
         s = self.settings
+        # The dynamic p99 refresh runs SQL against system.query.history through a
+        # control warehouse. When no control warehouse is configured, skip it and keep
+        # the fixed lookback (long_lb_min_minutes), so the monitor can run without ever
+        # starting a SQL warehouse (e.g. the Prometheus exporter). Set both
+        # control_workspace_host and control_warehouse_id to enable dynamic tuning.
+        if not (s.control_workspace_host and s.control_warehouse_id):
+            return
         p99_map = self._fetch_p99_wall_ms_by_warehouse_from_system_table(
             control_workspace_url=s.control_workspace_host,
             control_warehouse_id=s.control_warehouse_id,
@@ -927,8 +975,9 @@ if __name__ == "__main__":
         poll_interval_seconds=60,
         rolling_window_minutes=10,
         lookback_buffer_minutes=2,
-        control_workspace_host="<CONTROL_HOST_URL",
-        control_warehouse_id="<WAREHOUSE>",
+        # Optional: set control_workspace_host and control_warehouse_id to enable the
+        # dynamic p99 lookback refresh (runs SQL on that warehouse). Leave them unset to
+        # use the fixed lookback and never start a warehouse.
         warehouse_workspace_map={
             "warehouse_id_1": "warehouse_host_1",
             "warehouse_id_2": "warehouse_host_2",
