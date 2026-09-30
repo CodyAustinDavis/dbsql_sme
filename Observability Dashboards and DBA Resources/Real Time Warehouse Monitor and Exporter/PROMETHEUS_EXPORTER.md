@@ -135,13 +135,15 @@ permission it needs is CAN MONITOR on each SQL warehouse it watches.
 4. Inject the client id and secret as a k8s secret and expose them as `DATABRICKS_CLIENT_ID`
    / `DATABRICKS_CLIENT_SECRET`.
 
-> **Validate the service principal before relying on the query metrics.** Warehouses Get
-> returns the same details for anyone with CAN MONITOR, but Query History is identity-scoped,
-> and there are cases where a service principal sees only its own queries even with a warehouse
-> grant. If that happens, the query gauges (`dbsql_qps`, `dbsql_runtime_*`, `dbsql_queued_*`)
-> read empty or near-zero while `dbsql_warehouse_health_status` and `dbsql_warehouse_state`
-> look fine. Confirm with the actual SP against a warehouse that has other users' traffic, and
-> check that `dbsql_qps` reflects it.
+> **Confirm Query History visibility once with your service principal.** CAN MONITOR includes
+> viewing every user's queries on the warehouse. This was verified on AWS with a serverless
+> warehouse, where a service principal holding only CAN MONITOR saw the same queries from other
+> users that an admin saw, and a principal with no grant saw none. There is one public report of
+> a service principal seeing only its own queries, so run a quick check in your own workspace.
+> Point the exporter at a warehouse that has other users' traffic and confirm `dbsql_qps` and
+> `dbsql_rows_fetched_history` reflect it. If the query gauges read zero while
+> `dbsql_warehouse_health_status` and `dbsql_warehouse_state` look fine, the principal is seeing
+> only its own queries.
 
 ## Deploying in Kubernetes
 
