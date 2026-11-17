@@ -1,0 +1,44 @@
+# Databricks Limits Headroom Scanner: deploy with
+#   databricks bundle deploy -t prod --var catalog=<catalog> --var schema=<schema> --var warehouse_id=<id>
+# Failure emails: set notify_emails in a target (a list) or via BUNDLE_VAR_notify_emails.
+bundle:
+  name: limit-tracking
+
+include:
+  - resources/*.yml
+
+# Only runtime files go to the workspace; tests stay local.
+sync:
+  exclude:
+    - tests/**
+
+variables:
+  catalog:
+    description: Catalog that holds the limit-tracking schema
+  schema:
+    description: Schema for limits_reference, limit_changes, limit_usage and the views
+    default: limit_tracking
+  warehouse_id:
+    description: SQL warehouse that runs the SQL steps (needs SQL scripting support)
+  notify_emails:
+    description: Addresses emailed when the scan job fails (for example, a skipped REST collector under --strict)
+    type: complex
+    default: []
+
+targets:
+  dev:
+    # Not mode: development, so job and dashboard names have no "[dev <user>]" prefix. Dev keeps its
+    # own schema and workspace path so it never touches prod.
+    default: true
+    variables:
+      schema: limit_tracking_dev  # keep dev runs out of the prod schema
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    # Counts are only complete when the job runs as a metastore admin who is also a workspace admin.
+    # To run as a service principal instead of the deploying user, uncomment and set:
+    # run_as:
+    #   service_principal_name: <application-id>

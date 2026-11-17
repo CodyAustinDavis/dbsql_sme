@@ -1,0 +1,1057 @@
+{
+  "datasets": [
+    {
+      "name": "ds_limits",
+      "displayName": "Limits (latest)",
+      "queryLines": [
+        "WITH ctx AS (SELECT cloud FROM scan_context),\n",
+        "usage AS (\n",
+        "  SELECT limit_id,\n",
+        "         max_by(coalesce(parent_name, 'workspace ' || workspace_id), coalesce(pct_used, -1)) AS top_parent,\n",
+        "         max_by(usage_count, coalesce(pct_used, -1)) AS usage_count,\n",
+        "         max(pct_used) AS pct_used,\n",
+        "         bool_and(full_visibility) AS full_visibility,\n",
+        "         max(scan_ts) AS scan_ts\n",
+        "  FROM latest_usage\n",
+        "  GROUP BY limit_id\n",
+        ")\n",
+        "SELECT r.limit_id, r.level, r.area, r.resource, r.scope,\n",
+        "       r.resource || ' per ' || r.scope AS limit_name,\n",
+        "       CASE ctx.cloud WHEN 'aws' THEN r.limit_aws WHEN 'azure' THEN r.limit_azure ELSE r.limit_gcp END AS limit_value,\n",
+        "       u.usage_count, u.top_parent,\n",
+        "       round(u.pct_used / 100.0, 4) AS pct_used,\n",
+        "       CASE WHEN u.limit_id IS NULL THEN 'Not measured'\n",
+        "            WHEN u.pct_used IS NULL THEN 'Unknown (no limit for this cloud)'\n",
+        "            WHEN u.pct_used >= 90 THEN 'Critical (90%+)'\n",
+        "            WHEN u.pct_used >= 70 THEN 'Warning (70-90%)'\n",
+        "            ELSE 'OK (under 70%)' END AS status,\n",
+        "       CASE WHEN u.limit_id IS NOT NULL THEN 1 ELSE 0 END AS is_measured,\n",
+        "       CASE WHEN u.pct_used >= 70 THEN 1 ELSE 0 END AS is_warning,\n",
+        "       CASE WHEN u.pct_used >= 90 THEN 1 ELSE 0 END AS is_critical,\n",
+        "       CASE WHEN r.adjustable THEN 'Yes: request via account team' ELSE 'No (fixed)' END AS raisable,\n",
+        "       CASE WHEN u.full_visibility THEN 'Complete' WHEN u.limit_id IS NULL THEN '' ELSE 'Lower bound' END AS count_quality,\n",
+        "       r.measure_method, r.release_status, r.notes, u.scan_ts,\n",
+        "       CASE ctx.cloud WHEN 'aws' THEN r.source_url_aws WHEN 'azure' THEN r.source_url_azure ELSE r.source_url_gcp END AS source_url\n",
+        "FROM limits_reference r CROSS JOIN ctx\n",
+        "LEFT JOIN usage u ON u.limit_id = r.limit_id\n",
+        "ORDER BY u.pct_used DESC NULLS LAST, r.area, r.limit_id\n"
+      ]
+    },
+    {
+      "name": "ds_parents",
+      "displayName": "Usage by parent (latest)",
+      "queryLines": [
+        "SELECT u.limit_id, r.level, r.area, r.resource || ' per ' || r.scope AS limit_name,\n",
+        "       coalesce(u.parent_name,\n",
+        "                CASE WHEN u.workspace_id IS NOT NULL THEN 'workspace ' || u.workspace_id\n",
+        "                     ELSE '(whole ' || r.scope || ')' END) AS parent_name,\n",
+        "       u.workspace_id,\n",
+        "       u.usage_count, u.limit_value, round(u.pct_used / 100.0, 4) AS pct_used,\n",
+        "       CASE WHEN u.full_visibility THEN 'Complete' ELSE 'Lower bound' END AS count_quality,\n",
+        "       u.source, u.scan_ts\n",
+        "FROM latest_usage u\n",
+        "JOIN limits_reference r ON r.limit_id = u.limit_id\n",
+        "ORDER BY u.pct_used DESC NULLS LAST\n"
+      ]
+    },
+    {
+      "name": "ds_trend",
+      "displayName": "Trend (top limits)",
+      "queryLines": [
+        "WITH top_limits AS (\n",
+        "  SELECT limit_id FROM latest_usage GROUP BY limit_id ORDER BY max(pct_used) DESC NULLS LAST LIMIT 6\n",
+        ")\n",
+        "SELECT DATE_TRUNC('DAY', u.scan_ts) AS scan_day,\n",
+        "       u.limit_id, r.level, r.area,\n",
+        "       r.resource || ' per ' || r.scope AS limit_name,\n",
+        "       round(max(u.pct_used) / 100.0, 4) AS pct_used\n",
+        "FROM limit_usage u\n",
+        "JOIN top_limits t ON t.limit_id = u.limit_id\n",
+        "JOIN limits_reference r ON r.limit_id = u.limit_id\n",
+        "WHERE u.scan_ts >= date_sub(current_date(), 90)\n",
+        "GROUP BY 1, 2, 3, 4, 5\n",
+        "ORDER BY 1\n"
+      ]
+    },
+    {
+      "name": "ds_changes",
+      "displayName": "Limit changes",
+      "queryLines": [
+        "SELECT c.detected_on, c.limit_id,\n",
+        "       coalesce(r.resource || ' per ' || r.scope, c.limit_id) AS limit_name,\n",
+        "       c.change_type, c.cloud, c.old_value, c.new_value, c.source_url\n",
+        "FROM limit_changes c\n",
+        "LEFT JOIN limits_reference r ON r.limit_id = c.limit_id\n",
+        "WHERE c.change_type <> 'added' OR c.detected_on > (SELECT min(detected_on) FROM limit_changes)\n",
+        "ORDER BY c.logged_at DESC\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "headroom",
+      "displayName": "Headroom",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Usage vs documented limits from the latest scan. Raise anything at **Warning** or **Critical** with your account team. *Lower bound* = the scanner couldn't see every object."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_area",
+            "queries": [
+              {
+                "name": "q_limits_area",
+                "query": {
+                  "datasetName": "ds_limits",
+                  "fields": [
+                    {
+                      "name": "area",
+                      "expression": "`area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_parents_area",
+                "query": {
+                  "datasetName": "ds_parents",
+                  "fields": [
+                    {
+                      "name": "area",
+                      "expression": "`area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_trend_area",
+                "query": {
+                  "datasetName": "ds_trend",
+                  "fields": [
+                    {
+                      "name": "area",
+                      "expression": "`area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "area",
+                    "displayName": "Area",
+                    "queryName": "q_limits_area"
+                  },
+                  {
+                    "fieldName": "area",
+                    "displayName": "Area",
+                    "queryName": "q_parents_area"
+                  },
+                  {
+                    "fieldName": "area",
+                    "displayName": "Area",
+                    "queryName": "q_trend_area"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Area"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_status",
+            "queries": [
+              {
+                "name": "q_limits_status",
+                "query": {
+                  "datasetName": "ds_limits",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "status",
+                    "displayName": "Status",
+                    "queryName": "q_limits_status"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Status"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_measured",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_limits",
+                  "fields": [
+                    {
+                      "name": "sum(is_measured)",
+                      "expression": "SUM(`is_measured`)"
+                    },
+                    {
+                      "name": "count(limit_id)",
+                      "expression": "COUNT(`limit_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(is_measured)",
+                  "displayName": "Limits measured",
+                  "formatTemplate": "{{@formatted}} of {{count(limit_id)}}"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Limits measured (of tracked)"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_warning",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_limits",
+                  "fields": [
+                    {
+                      "name": "sum(is_warning)",
+                      "expression": "SUM(`is_warning`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(is_warning)",
+                  "displayName": "At 70% or more",
+                  "style": {
+                    "rules": [
+                      {
+                        "condition": {
+                          "operator": ">",
+                          "operand": {
+                            "type": "data-value",
+                            "value": "0"
+                          }
+                        },
+                        "color": "#E69F00"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "At 70% or more"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_critical",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_limits",
+                  "fields": [
+                    {
+                      "name": "sum(is_critical)",
+                      "expression": "SUM(`is_critical`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(is_critical)",
+                  "displayName": "At 90% or more",
+                  "style": {
+                    "rules": [
+                      {
+                        "condition": {
+                          "operator": ">",
+                          "operand": {
+                            "type": "data-value",
+                            "value": "0"
+                          }
+                        },
+                        "color": "#D55E00"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "At 90% or more"
+              }
+            }
+          },
+          "position": {
+            "x": 10,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_top",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_limits",
+                  "fields": [
+                    {
+                      "name": "limit_name",
+                      "expression": "`limit_name`"
+                    },
+                    {
+                      "name": "max(pct_used)",
+                      "expression": "MAX(`pct_used`)"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`is_measured` = 1"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "max(pct_used)",
+                  "displayName": "% of limit used",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "limit_name",
+                  "displayName": "Limit",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "value"
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "status",
+                  "displayName": "Status",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Critical (90%+)",
+                        "color": "#D55E00"
+                      },
+                      {
+                        "value": "Warning (70-90%)",
+                        "color": "#E69F00"
+                      },
+                      {
+                        "value": "OK (under 70%)",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Not measured",
+                        "color": "#9AA5B1"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Measured limits by % used"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 7,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "line_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_trend",
+                  "fields": [
+                    {
+                      "name": "scan_day",
+                      "expression": "`scan_day`"
+                    },
+                    {
+                      "name": "max(pct_used)",
+                      "expression": "MAX(`pct_used`)"
+                    },
+                    {
+                      "name": "limit_name",
+                      "expression": "`limit_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "scan_day",
+                  "displayName": "Scan date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "max(pct_used)",
+                  "displayName": "% of limit used",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "limit_name",
+                  "displayName": "Limit",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily trend for the 6 highest limits (since the first scan, up to 90 days)"
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 3,
+            "width": 5,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "table_limits",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_limits",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "level",
+                      "expression": "`level`"
+                    },
+                    {
+                      "name": "area",
+                      "expression": "`area`"
+                    },
+                    {
+                      "name": "limit_name",
+                      "expression": "`limit_name`"
+                    },
+                    {
+                      "name": "usage_count",
+                      "expression": "`usage_count`"
+                    },
+                    {
+                      "name": "limit_value",
+                      "expression": "`limit_value`"
+                    },
+                    {
+                      "name": "pct_used",
+                      "expression": "`pct_used`"
+                    },
+                    {
+                      "name": "top_parent",
+                      "expression": "`top_parent`"
+                    },
+                    {
+                      "name": "raisable",
+                      "expression": "`raisable`"
+                    },
+                    {
+                      "name": "count_quality",
+                      "expression": "`count_quality`"
+                    },
+                    {
+                      "name": "measure_method",
+                      "expression": "`measure_method`"
+                    },
+                    {
+                      "name": "notes",
+                      "expression": "`notes`"
+                    },
+                    {
+                      "name": "source_url",
+                      "expression": "`source_url`"
+                    },
+                    {
+                      "name": "scan_ts",
+                      "expression": "`scan_ts`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "status",
+                    "displayName": "Status",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Critical (90%+)"
+                            },
+                            "operator": "="
+                          },
+                          "fontColor": {
+                            "hex": "#D55E00"
+                          }
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Warning (70-90%)"
+                            },
+                            "operator": "="
+                          },
+                          "fontColor": {
+                            "hex": "#B07A00"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "level",
+                    "displayName": "Level"
+                  },
+                  {
+                    "fieldName": "area",
+                    "displayName": "Area"
+                  },
+                  {
+                    "fieldName": "limit_name",
+                    "displayName": "Limit"
+                  },
+                  {
+                    "fieldName": "usage_count",
+                    "displayName": "Used"
+                  },
+                  {
+                    "fieldName": "limit_value",
+                    "displayName": "Limit"
+                  },
+                  {
+                    "fieldName": "pct_used",
+                    "displayName": "% used",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "top_parent",
+                    "displayName": "Highest parent"
+                  },
+                  {
+                    "fieldName": "raisable",
+                    "displayName": "Can be raised"
+                  },
+                  {
+                    "fieldName": "count_quality",
+                    "displayName": "Count"
+                  },
+                  {
+                    "fieldName": "measure_method",
+                    "displayName": "Measured via"
+                  },
+                  {
+                    "fieldName": "notes",
+                    "displayName": "Notes"
+                  },
+                  {
+                    "fieldName": "source_url",
+                    "displayName": "Docs",
+                    "link": {
+                      "templatedURL": "{{@}}"
+                    }
+                  },
+                  {
+                    "fieldName": "scan_ts",
+                    "displayName": "Scanned"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "All tracked limits"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "table_parents",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_parents",
+                  "fields": [
+                    {
+                      "name": "level",
+                      "expression": "`level`"
+                    },
+                    {
+                      "name": "limit_name",
+                      "expression": "`limit_name`"
+                    },
+                    {
+                      "name": "parent_name",
+                      "expression": "`parent_name`"
+                    },
+                    {
+                      "name": "usage_count",
+                      "expression": "`usage_count`"
+                    },
+                    {
+                      "name": "limit_value",
+                      "expression": "`limit_value`"
+                    },
+                    {
+                      "name": "pct_used",
+                      "expression": "`pct_used`"
+                    },
+                    {
+                      "name": "count_quality",
+                      "expression": "`count_quality`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "level",
+                    "displayName": "Level"
+                  },
+                  {
+                    "fieldName": "limit_name",
+                    "displayName": "Limit"
+                  },
+                  {
+                    "fieldName": "parent_name",
+                    "displayName": "Parent"
+                  },
+                  {
+                    "fieldName": "usage_count",
+                    "displayName": "Used"
+                  },
+                  {
+                    "fieldName": "limit_value",
+                    "displayName": "Limit"
+                  },
+                  {
+                    "fieldName": "pct_used",
+                    "displayName": "% used",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "count_quality",
+                    "displayName": "Count"
+                  },
+                  {
+                    "fieldName": "source",
+                    "displayName": "Scanner"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Usage by parent object (top 100 per limit)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "table_changes",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_changes",
+                  "fields": [
+                    {
+                      "name": "detected_on",
+                      "expression": "`detected_on`"
+                    },
+                    {
+                      "name": "limit_name",
+                      "expression": "`limit_name`"
+                    },
+                    {
+                      "name": "change_type",
+                      "expression": "`change_type`"
+                    },
+                    {
+                      "name": "cloud",
+                      "expression": "`cloud`"
+                    },
+                    {
+                      "name": "old_value",
+                      "expression": "`old_value`"
+                    },
+                    {
+                      "name": "new_value",
+                      "expression": "`new_value`"
+                    },
+                    {
+                      "name": "source_url",
+                      "expression": "`source_url`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "detected_on",
+                    "displayName": "Detected"
+                  },
+                  {
+                    "fieldName": "limit_name",
+                    "displayName": "Limit"
+                  },
+                  {
+                    "fieldName": "change_type",
+                    "displayName": "Change"
+                  },
+                  {
+                    "fieldName": "cloud",
+                    "displayName": "Cloud"
+                  },
+                  {
+                    "fieldName": "old_value",
+                    "displayName": "Old"
+                  },
+                  {
+                    "fieldName": "new_value",
+                    "displayName": "New"
+                  },
+                  {
+                    "fieldName": "source_url",
+                    "displayName": "Docs",
+                    "link": {
+                      "templatedURL": "{{@}}"
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Documented limit changes"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 28,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_level",
+            "queries": [
+              {
+                "name": "q_limits_level",
+                "query": {
+                  "datasetName": "ds_limits",
+                  "fields": [
+                    {
+                      "name": "level",
+                      "expression": "`level`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_parents_level",
+                "query": {
+                  "datasetName": "ds_parents",
+                  "fields": [
+                    {
+                      "name": "level",
+                      "expression": "`level`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_trend_level",
+                "query": {
+                  "datasetName": "ds_trend",
+                  "fields": [
+                    {
+                      "name": "level",
+                      "expression": "`level`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "level",
+                    "displayName": "Level",
+                    "queryName": "q_limits_level"
+                  },
+                  {
+                    "fieldName": "level",
+                    "displayName": "Level",
+                    "queryName": "q_parents_level"
+                  },
+                  {
+                    "fieldName": "level",
+                    "displayName": "Level",
+                    "queryName": "q_trend_level"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Level"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 2,
+            "height": 2
+          }
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {
+        "light": "#FCFCFC",
+        "dark": "#1F272D"
+      },
+      "widgetBackgroundColor": {
+        "light": "#FFFFFF",
+        "dark": "#11171C"
+      },
+      "widgetBorderColor": {
+        "light": "#FFFFFF",
+        "dark": "#11171C"
+      },
+      "fontColor": {
+        "light": "#11171C",
+        "dark": "#E8ECF0"
+      },
+      "selectionColor": {
+        "light": "#2272B4",
+        "dark": "#8ACAFF"
+      },
+      "visualizationColors": [
+        "#0072B2",
+        "#E69F00",
+        "#009E73",
+        "#CC79A7",
+        "#56B4E9",
+        "#D55E00",
+        "#F0E442"
+      ],
+      "widgetHeaderAlignment": "LEFT"
+    }
+  }
+}

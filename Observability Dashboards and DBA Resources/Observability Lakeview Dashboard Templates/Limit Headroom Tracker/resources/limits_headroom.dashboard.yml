@@ -1,0 +1,8 @@
+resources:
+  dashboards:
+    limits_headroom:
+      display_name: Databricks limits headroom
+      file_path: ../dashboards/limits_headroom.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: ${var.schema}

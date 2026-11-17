@@ -1,0 +1,59 @@
+resources:
+  jobs:
+    limit_tracking_scan:
+      name: limit-tracking-scan
+      description: Seed documented Databricks limits and record current usage vs those limits.
+      max_concurrent_runs: 1  # the seed's change-log diff assumes one run at a time
+      email_notifications:
+        on_failure: ${var.notify_emails}
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: UTC
+        pause_status: UNPAUSED  # development mode pauses schedules automatically
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+      environments:
+        - environment_key: rest
+          spec:
+            environment_version: "3"
+            dependencies:
+              - databricks-sdk>=0.164.0
+      tasks:
+        - task_key: setup
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/01_tables.sql
+              source: WORKSPACE
+        - task_key: seed
+          depends_on: [{task_key: setup}]
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/02_seed_limits_reference.sql
+              source: WORKSPACE
+        - task_key: scan_uc
+          depends_on: [{task_key: seed}]
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/03_scan_uc.sql
+              source: WORKSPACE
+        - task_key: scan_rest
+          depends_on: [{task_key: seed}]
+          environment_key: rest
+          spark_python_task:
+            python_file: ../scripts/scan_rest.py
+            parameters:
+              - --warehouse
+              - ${var.warehouse_id}
+              - --catalog
+              - "{{job.parameters.catalog}}"
+              - --schema
+              - "{{job.parameters.schema}}"
+              # Fail the run (and email notify_emails) if a collector was skipped. Disabled features list as
+              # empty rather than erroring; remove --strict if an API is intentionally blocked for this identity.
+              - --strict
