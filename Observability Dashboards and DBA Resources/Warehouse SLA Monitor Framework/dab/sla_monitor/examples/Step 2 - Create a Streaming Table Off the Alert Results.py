@@ -1,4 +1,5 @@
 # Databricks notebook source
+
 # DBTITLE 1,Define Alert Stream Paramters
 database_name = "main.query_alert_manager"
 checkpoint_location = "/dbfs/tmp/query_alert_manager/checkpoints" ## Define you checkpoint location for your SLA alert
