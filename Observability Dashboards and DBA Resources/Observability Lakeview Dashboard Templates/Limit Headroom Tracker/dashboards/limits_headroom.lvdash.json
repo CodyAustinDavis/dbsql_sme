@@ -139,19 +139,6 @@
                   ],
                   "disaggregated": false
                 }
-              },
-              {
-                "name": "q_trend_area",
-                "query": {
-                  "datasetName": "ds_trend",
-                  "fields": [
-                    {
-                      "name": "area",
-                      "expression": "`area`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
               }
             ],
             "spec": {
@@ -168,11 +155,6 @@
                     "fieldName": "area",
                     "displayName": "Area",
                     "queryName": "q_parents_area"
-                  },
-                  {
-                    "fieldName": "area",
-                    "displayName": "Area",
-                    "queryName": "q_trend_area"
                   }
                 ]
               },
@@ -544,7 +526,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Daily trend for the 6 highest limits (since the first scan, up to 90 days)"
+                "title": "Daily trend for the 6 highest limits overall (since the first scan, up to 90 days; Area and Level filters don’t apply)"
               }
             }
           },
@@ -967,19 +949,6 @@
                   ],
                   "disaggregated": false
                 }
-              },
-              {
-                "name": "q_trend_level",
-                "query": {
-                  "datasetName": "ds_trend",
-                  "fields": [
-                    {
-                      "name": "level",
-                      "expression": "`level`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
               }
             ],
             "spec": {
@@ -996,11 +965,6 @@
                     "fieldName": "level",
                     "displayName": "Level",
                     "queryName": "q_parents_level"
-                  },
-                  {
-                    "fieldName": "level",
-                    "displayName": "Level",
-                    "queryName": "q_trend_level"
                   }
                 ]
               },

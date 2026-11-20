@@ -101,8 +101,13 @@ noted here where they aren't:
 - **Tables** count every row in `information_schema.tables`, including views.
 - **Serving endpoints** leave out Databricks-provided Foundation Model endpoints (`databricks-*`); the
   documented limit covers custom model and agent endpoints.
-- **Registered models, model versions and clean rooms** are counted from the workspace the job runs in.
-  Catalogs bound to other workspaces may not be visible from it.
+- **All counts are taken from the workspace the job runs in.** A catalog bound only to other
+  workspaces isn't visible from it, so its schemas, tables, volumes and models aren't counted, even
+  when `full_visibility` is TRUE. Run the job from a workspace every catalog is bound to.
+- **Usage that drops to zero** is written as a 0 row, so removed objects stop showing. Rows more
+  than 7 days older than a scanner's newest scan (a collector that keeps failing, or a workspace that
+  stopped running the job) drop out of `latest_usage`.
+- **The trend chart** shows the 6 highest limits overall; the Area and Level filters don't apply to it.
 - **Limit values** come from the public docs. If your account team has raised a limit for you, the
   dashboard will overstate % used for it.
 

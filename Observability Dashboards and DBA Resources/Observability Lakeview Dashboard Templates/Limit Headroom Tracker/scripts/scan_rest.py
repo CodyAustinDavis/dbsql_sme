@@ -35,10 +35,13 @@ def count(it):
 
 
 def top(limit_id, counts, scope_kind, complete=True):
-    return [
+    """Top parents; a 0 row when there are none, so old rows stop showing in latest_usage.
+    complete=False when some parents couldn't be read: the rows are then lower bounds."""
+    rows = [
         {"limit_id": limit_id, "parent_name": k, "usage_count": v, "scope_kind": scope_kind, "complete": complete}
         for k, v in Counter(counts).most_common(TOP_N)
     ]
+    return rows or one(limit_id, 0, scope_kind, complete=complete)
 
 
 def one(limit_id, n, scope_kind, parent=None, complete=True):
@@ -50,7 +53,6 @@ def one(limit_id, n, scope_kind, parent=None, complete=True):
 
 def collect(w):
     """Return (rows, warnings). Each collector is independent; one failing API doesn't stop the rest."""
-    ws = None  # workspace-scoped rows carry workspace_id in its own column
     rows, warnings = [], []
 
     def uc_models():
@@ -71,7 +73,7 @@ def collect(w):
         return (
             top("uc_registered_models_per_schema", per_schema, "metastore")
             + one("uc_registered_models_per_metastore", len(models), "metastore")
-            + top("uc_model_versions_per_model", versions_per_model, "metastore")
+            + top("uc_model_versions_per_model", versions_per_model, "metastore", complete=complete)
             + one("uc_model_versions_per_metastore", sum(versions_per_model.values()), "metastore",
                   complete=complete)
         )
@@ -92,26 +94,26 @@ def collect(w):
         with ThreadPoolExecutor(WORKERS) as pool:
             n_idx = list(pool.map(indexes, eps))
         idx = {f"endpoint {e}": n for e, n in zip(eps, n_idx) if n is not None}
-        return (one("ws_ai_search_endpoints_per_workspace", len(eps), "workspace", ws)
-                + top("ai_search_indexes_per_endpoint", idx, "workspace"))
+        return (one("ws_ai_search_endpoints_per_workspace", len(eps), "workspace")
+                + top("ai_search_indexes_per_endpoint", idx, "workspace", complete=len(idx) == len(eps)))
 
     def ip_entries():
         lists = list(w.ip_access_lists.list())
-        return one("ws_ip_access_entries_per_workspace", sum(len(l.ip_addresses or []) for l in lists), "workspace", ws)
+        return one("ws_ip_access_entries_per_workspace", sum(len(l.ip_addresses or []) for l in lists), "workspace")
 
     collectors = {
         "registered models / model versions": uc_models,
         "clean rooms": clean_rooms,
-        "apps": lambda: one("ws_apps_per_workspace", count(w.apps.list()), "workspace", ws),
-        "jobs": lambda: one("ws_saved_jobs_per_workspace", count(w.jobs.list(limit=100)), "workspace", ws),
-        "pipelines": lambda: one("ws_saved_pipelines_per_workspace", count(w.pipelines.list_pipelines(max_results=100)), "workspace", ws),
-        "SQL warehouses": lambda: one("ws_sql_warehouses_per_workspace", count(w.warehouses.list()), "workspace", ws),
-        "secret scopes": lambda: one("ws_secret_scopes_per_workspace", count(w.secrets.list_scopes()), "workspace", ws),
+        "apps": lambda: one("ws_apps_per_workspace", count(w.apps.list()), "workspace"),
+        "jobs": lambda: one("ws_saved_jobs_per_workspace", count(w.jobs.list(limit=100)), "workspace"),
+        "pipelines": lambda: one("ws_saved_pipelines_per_workspace", count(w.pipelines.list_pipelines(max_results=100)), "workspace"),
+        "SQL warehouses": lambda: one("ws_sql_warehouses_per_workspace", count(w.warehouses.list()), "workspace"),
+        "secret scopes": lambda: one("ws_secret_scopes_per_workspace", count(w.secrets.list_scopes()), "workspace"),
         # Databricks-provided Foundation Model endpoints (databricks-*) are excluded: the limit covers
         # custom model and agent endpoints.
         "serving endpoints": lambda: one("ws_serving_endpoints_per_workspace",
                                          count(e for e in w.serving_endpoints.list() if not (e.name or "").startswith("databricks-")),
-                                         "workspace", ws),
+                                         "workspace"),
         "AI Search": ai_search,
         "IP access lists": ip_entries,
     }

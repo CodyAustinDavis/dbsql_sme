@@ -116,6 +116,11 @@ BEGIN
     ),
   ranked AS (
     SELECT *, row_number() OVER (PARTITION BY limit_id ORDER BY usage_count DESC) AS rn FROM usage
+    -- A per-parent limit with no parents left gets a 0 row, so latest_usage stops showing old rows.
+    UNION ALL
+    SELECT id, CAST(NULL AS STRING), 0, 1
+    FROM (SELECT explode(v_scanned_ids) AS id) ids
+    WHERE id NOT IN (SELECT limit_id FROM usage)
   ),
   lim AS (
     SELECT limit_id,

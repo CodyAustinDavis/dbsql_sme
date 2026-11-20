@@ -85,6 +85,9 @@ BEGIN
         || ' WHERE full_visibility IS NULL';
       EXECUTE IMMEDIATE v_sql;
     END;
+    -- Nothing to copy from (no metastore_admin column): record them as lower bounds.
+    SET v_sql = 'UPDATE ' || v_prefix || '.limit_usage SET full_visibility = false WHERE full_visibility IS NULL';
+    EXECUTE IMMEDIATE v_sql;
   END IF;
 
   -- Shared by 03 and 04 so both scanners resolve cloud and metastore visibility the same way.
@@ -97,11 +100,14 @@ BEGIN
 
   -- Latest scan from each scanner (information_schema and rest_api write separate scan_ts values).
   -- A view body must name its source literally, so build it from the escaped v_prefix.
-  -- Latest scan per source, limit and workspace: a collector skipped in the latest run keeps its
-  -- previous rows (check scan_ts), and each workspace keeps its own latest rows.
+  -- Latest scan per source, limit and workspace. Scans write at least one row per limit (a 0 row
+  -- when nothing is found), so dropped objects stop showing. A collector skipped in the latest run
+  -- keeps its previous rows (check scan_ts), but rows more than 7 days older than that scanner's
+  -- newest scan drop out, so a skipped collector or a workspace that stopped scanning ages out.
   -- Explicit columns, so upgraded tables (which may keep legacy columns) expose the same shape.
   SET v_sql = 'CREATE OR REPLACE VIEW ' || v_prefix || '.latest_usage AS SELECT scan_ts, limit_id, cloud, '
     || 'parent_name, workspace_id, usage_count, limit_value, pct_used, scanned_by, full_visibility, source FROM '
-    || v_prefix || '.limit_usage QUALIFY scan_ts = max(scan_ts) OVER (PARTITION BY source, limit_id, workspace_id)';
+    || v_prefix || '.limit_usage QUALIFY scan_ts = max(scan_ts) OVER (PARTITION BY source, limit_id, workspace_id) '
+    || 'AND scan_ts >= max(scan_ts) OVER (PARTITION BY source) - INTERVAL 7 DAYS';
   EXECUTE IMMEDIATE v_sql;
 END;
